@@ -1,0 +1,26 @@
+{
+  "R": {
+    "Version": "4.0.4",
+    "Repositories": [
+      {
+        "Name": "CRAN",
+        "URL": "https://mran.microsoft.com/snapshot/2021-02-22"
+      }
+    ]
+  },
+  "Packages": {
+    "renv": {
+      "Package": "renv",
+      "Version": "0.12.5",
+      "Source": "CRAN",
+      "Repository": "CRAN",
+      "RemoteType": "standard",
+      "RemotePkgRef": "renv",
+      "RemoteRef": "renv",
+      "RemoteRepos": "https://cloud.r-project.org/",
+      "RemotePkgType": "source",
+      "RemoteSha": "0.12.5",
+      "Hash": "5c0cdb37f063c58cdab3c7e9fbb8bd2c"
+    }
+  }
+}
