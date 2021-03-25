@@ -61,7 +61,11 @@ regulons_lineage<-fread("../singlecell/outputs/06-SCENIC/cbps0-8_clean/tf_marker
 regulons_lineage_f<-regulons_lineage[p_val_adj<10^-30&avg_log2FC>0]
 table(regulons_lineage_f$lineage)
 res_gsea_lineage<-merge(res_gsea,regulons_lineage_f[,.(regulon,lineage,p_val_adj)])
-
+res_gsea_lineage<-res_gsea_lineage[padj<0.001&p_val_adj<0.001]
+ggplot(res_gsea_lineage[!str_detect(regulon,'e$')&lineage%in%c("HSC","MPP","Erythroid","Lymphoid","Myeloid")])+
+  geom_col(aes(x=regulon,y=-log10(padj),fill=-log10(p_val_adj)))+facet_grid( .~ lineage, space = "free_x",scales="free_x")+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 9),
+        axis.title=element_text(size=12,face="bold"))
 table(res_gsea_lineage[padj<0.001]$lineage)
 res_gsea_lineage[padj<0.001&!str_detect(regulon,'e$')]
 
@@ -87,23 +91,33 @@ res_gsea<-res_gsea_all[compa=="CF.LF"][,regulon:=pathway][,-"pathway"]
 
 res_gsea_lineage<-merge(res_gsea,regulons_lineage_f[,.(regulon,lineage,p_val_adj)])
 res_gsea_lineage<-res_gsea_lineage[padj<0.001&p_val_adj<0.001]
+
+res_gsea_lineage[,n.enriched:=length(tr(leadingEdge,sep = "|")),by="regulon"]
+res_gsea_lineage[,pct.enriched:=n.enriched/size]
+
 ggplot(res_gsea_lineage[!str_detect(regulon,'e$')&lineage%in%c("HSC","MPP","Erythroid","Lymphoid","Myeloid")])+
-  geom_col(aes(x=regulon,y=-log10(padj),fill=-log10(p_val_adj)))+facet_grid( .~ lineage, space = "free_x",scales="free_x")+
+  geom_point(aes(x=regulon,y=pct.enriched,size=size,col=-log10(p_val_adj+1e-300)))+facet_grid( .~ lineage, space = "free_x",scales="free_x")+
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 9),
         axis.title=element_text(size=12,face="bold"))
 
 table(res_gsea_lineage[padj<0.001]$lineage)
 res_gsea_lineage[padj<0.001&!str_detect(regulon,'e$')]
 
-ggplot(res_gsea_lineage[padj<0.001&!str_detect(regulon,'e$')])+geom_bar(aes(x=lineage))
-ggplot(res_gsea_lineage[padj<0.001&!str_detect(regulon,'e$')])+geom_boxplot(aes(x=lineage,y=-log10(padj)))
+res_gsea[regulon=="JUN"]
+VlnPlot(cbps,c("JUN"),group.by = "hto",split.by ="group" ,idents = "HSC",pt.size = 0)
+dt<-data.table(JUN=cbps@assays$TF_AUC@counts["JUN",],
+           cbps@meta.data)
 
-
+plot(density(dt$JUN))
+abline(v=0.5)
+dt[,pct.JUN:=sum(JUN>0.5)/.N,by=c("lineage","sample","hto")]
+ggplot(unique(dt,by=c("sample","hto")))+geom_boxplot(aes(x=hto,y=pct.JUN,fill=group))+facet_wrap("lineage")
 
 
 #over representation test [à finir]
 res_meth[,gene_score_scaled:=scale(GeneScore,center = F),by="compa"]
 unique(res_meth[gene=="SOCS3",.(gene,compa,GeneScore,gene_score_scaled)])
 unique(res_meth[gene=="HES1",.(gene,compa,GeneScore,gene_score_scaled)])
+
 
 
