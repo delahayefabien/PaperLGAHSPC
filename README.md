@@ -1,6 +1,26 @@
 # methyl
 
 Analyst: Alexandre Pelletier
+##Config
+``` bash
+git config --global user.email "apelletier@egid.local"
+git config --global user.name "Alexandre Pelletier"
+```
+## install dependencies
+``` r
+renv::hydrate()
+renv::install(c("YuLab-SMU/clusterProfiler"))
+renv::snapshot() #git commit
+```
+
+## add symbolic link to datasets, ref and old project directory
+
+``` bash
+cd 
+ln -s /disks/DATATMP/PhD_AlexandrePelletier/methyl/methyl/datasets datasets
+ln -s /disks/DATATMP/PhD_AlexandrePelletier/methyl/methyl/ref ref
+ln -s /disks/DATATMP/HSPC_EpiStress_AlexandrePelletier/methyl/ old 
+```
 
 <!--
 ## Design
