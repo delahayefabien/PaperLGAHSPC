@@ -1,0 +1,177 @@
+#figures paper methyl
+source("../methyl/scripts/utils/new_utils.R")
+library(limma)
+library(pheatmap)
+out<-"../methyl/outputs/figures_paper_meth"
+dir.create(out)
+#validation cohorts
+meth<-fread("../methyl/datasets/cd34/2020-05-25_methyl_data_before_limma.csv")
+mtd<-fread("../methyl/datasets/cd34/cleaned_batch_CD34_library_date_220620.csv")
+
+var_to_model<-c("Group_Sex","Mat.Age","latino","Group_Complexity_Fac")
+
+mtdf<-mtd[rowSums(is.na(mtd[,.SD,.SDcols=var_to_model]))==0][batch==2]
+formule<- ~0 + Group_Sex  + latino + Mat.Age + Group_Complexity_Fac 
+
+design<-model.matrix(formule,data = data.frame(mtdf,row.names = "sample"))
+fit <- lmFit(data.frame(meth,row.names = "locisID")[,mtdf$sample], design)
+
+cont.matrix <- makeContrasts(C.L = "(Group_SexC_F+Group_SexC_M)-(Group_SexL_F+Group_SexL_M)",
+                             F.M="(Group_SexC_F+Group_SexL_F)-(Group_SexC_M+Group_SexL_M)",
+                             CF.CM="Group_SexC_F-Group_SexC_M",
+                             CF.LF="Group_SexC_F-Group_SexL_F",
+                             CF.LM="Group_SexC_F-Group_SexL_M",
+                             CM.LM="Group_SexC_M-Group_SexL_M",
+                             CM.LF="Group_SexC_M-Group_SexL_F",
+                             LM.LF="Group_SexL_M-Group_SexL_F",
+                             levels=design)
+
+
+fit2  <- contrasts.fit(fit, cont.matrix)
+fit2  <- eBayes(fit2)
+
+res<-Reduce(rbind,lapply(colnames(cont.matrix), function(comp)data.table(topTable(fit2,coef = comp,n = Inf),keep.rownames = "cpg_id")[,compa:=comp]))
+fwrite(res,fp(out,"res_limma_cohort2.tsv.gz"),sep="\t")
+res<-fread(fp(out,"res_limma_cohort2.tsv.gz"),sep="\t")
+
+table(res[adj.P.Val<0.2&abs(logFC)>30][,hyper_meth:=logFC>0][,.(hyper_meth,compa)])
+p<-ggplot(res[compa%in%c("C.L","CF.LF",'CM.LM',"LM.LF")])+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=adj.P.Val<0.2&abs(logFC)>30))+
+  facet_wrap("compa")+
+  scale_color_manual(values = c("grey","red"))
+ggsave(fp(out,"volcano_plot_cohort2.png"),plot=p,height=5,width=7)
+
+#comp to cohort 1 
+mtdf<-mtd[rowSums(is.na(mtd[,.SD,.SDcols=var_to_model]))==0][batch==1]
+formule<- ~0 + Group_Sex  + latino + Mat.Age + Group_Complexity_Fac 
+
+design<-model.matrix(formule,data = data.frame(mtdf,row.names = "sample"))
+fit <- lmFit(data.frame(meth,row.names = "locisID")[,mtdf$sample], design)
+
+cont.matrix <- makeContrasts(C.L = "(Group_SexC_F+Group_SexC_M)-(Group_SexL_F+Group_SexL_M)",
+                             F.M="(Group_SexC_F+Group_SexL_F)-(Group_SexC_M+Group_SexL_M)",
+                             CF.CM="Group_SexC_F-Group_SexC_M",
+                             CF.LF="Group_SexC_F-Group_SexL_F",
+                             CF.LM="Group_SexC_F-Group_SexL_M",
+                             CM.LM="Group_SexC_M-Group_SexL_M",
+                             CM.LF="Group_SexC_M-Group_SexL_F",
+                             LM.LF="Group_SexL_M-Group_SexL_F",
+                             levels=design)
+
+
+fit2  <- contrasts.fit(fit, cont.matrix)
+fit2  <- eBayes(fit2)
+
+#merge res cohort 1 and 2
+
+res<-rbind(res[,cohort:=2],
+           Reduce(rbind,lapply(colnames(cont.matrix),
+                               function(comp)data.table(topTable(fit2,coef = comp,n = Inf),
+                                                        keep.rownames = "cpg_id")[,compa:=comp]))[,cohort:=1])
+fwrite(res,fp(out,"res_limma_cohorts.tsv.gz"),sep="\t")
+
+#cl
+ggplot(res[compa%in%c("C.L")])+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-4&abs(logFC)>30),size=)+
+  facet_wrap("cohort")+
+  scale_color_manual(values = c("grey","red"))
+
+#cflf
+ggplot(res[compa%in%c("CF.LF")])+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-4&abs(logFC)>30))+
+  facet_wrap("cohort")+
+  scale_color_manual(values = c("grey","red"))
+
+#cmlm
+ggplot(res[compa%in%c("CM.LM")])+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-4&abs(logFC)>30))+
+  facet_wrap("cohort")+
+  scale_color_manual(values = c("grey","red"))
+
+
+table(res[P.Value<10^-4&abs(logFC)>30][,hyper_meth:=logFC>0][,.(hyper_meth,compa,cohort)])
+
+#genescore heatmap
+meth_df<-melt(meth,id.vars = 1,
+              variable.name = "sample",
+              value.name = "methylation")
+cpgs_weight<-fread("../methyl/ref/2020-06-29_All_CpG-Gene_links.csv")
+cpgs_weight[,cpg_weight:=RegWeight+LinksWeight]
+meth_df<-merge(meth_df,cpgs_weight[,.(locisID,gene,cpg_weight)],by="locisID")
+meth_df[,gene_meth:=sum(methylation*cpg_weight)/sum(cpg_weight),by=c("sample","gene")]
+fwrite(meth_df,fp(out,"methylation_sum_by_gene_datatable.tsv.gz"),sep="\t")
+meth_genes<-unique(meth_df,by=c("sample","gene"))
+
+meth_genes[,gene_meth_scaled:=scale(gene_meth),by=c("sample")]
+
+meth_genes_mat<-dcast(meth_genes[,-c("locisID","hi.conf.genes","methylation","gene_meth")],sample~gene)
+meth_genes_mat[1:10,1:10]
+
+meth_genes_mat<-as.matrix(data.frame(meth_genes_mat,row.names = "sample"))
+meth_genes_mat<-t(meth_genes_mat)
+meth_genes_mat[1:10,1:10]
+dim(meth_genes_mat)
+
+
+pheatmap(meth_genes_mat,
+         annotation_col = data.frame(mtd,row.names = "sample")[colnames(meth_genes_mat),c("Group_Sex","Group_Complexity_Fac")],
+         show_rownames = F,show_colnames = F
+        )
+
+#top1000 sd Ctrl LGA samples
+meth_genes<-merge(meth_genes,mtd,by="sample")
+meth_genes_cl<-meth_genes[Group_name%in%c("C","L")]
+meth_genes_cl[,sd:=sd(gene_meth_scaled),by="gene"]
+meth_genes_cl[,top1000:=sd>=sort(sd,decreasing = T)[1000],by="sample"]
+pheatmap(meth_genes_mat[rownames(meth_genes_mat)%in%unique(meth_genes_cl[top1000==T]$gene),unique(meth_genes_cl$sample)],
+         annotation_col = data.frame(mtd,row.names = "sample")[unique(meth_genes_cl$sample),c("Group_name","Gender","Library_Complexity")],
+         show_rownames = F,show_colnames = F
+        )
+
+meth_genes_cl[Group_Complexity_Fac==4,sd.complex:=sd(gene_meth_scaled),by="gene"]
+meth_genes_cl[,top1000.complex:=sd.complex>=sort(sd.complex,decreasing = T)[1000],by="sample"]
+
+pheatmap(meth_genes_mat[rownames(meth_genes_mat)%in%unique(meth_genes_cl[top1000.complex==T]$gene),unique(meth_genes_cl$sample)],
+         annotation_col = data.frame(mtd,row.names = "sample")[unique(meth_genes_cl$sample),c("Group_name","Gender","Library_Complexity")],
+         show_rownames = F,show_colnames = F
+        )
+
+
+#hi conf genes
+meth_df[,hi.conf.genes:=sum(cpg_weight>=1.5)>5,by=c("sample","gene")]
+
+meth_genes_hi<-unique(meth_df,by=c("sample","gene"))[hi.conf.genes==T]
+meth_genes_mat_hi<-dcast(meth_genes_hi[,-c("locisID","methylation","hi.conf.genes")],sample~gene)
+meth_genes_mat_hi[1:10,1:10]
+
+meth_genes_mat_hi<-as.matrix(data.frame(meth_genes_mat_hi,row.names = "sample"))
+meth_genes_mat_hi<-t(meth_genes_mat_hi)
+meth_genes_mat_hi[1:10,1:10]
+dim(meth_genes_mat_hi)
+
+
+pheatmap(meth_genes_mat_hi,
+         annotation_col = data.frame(mtd,row.names = "sample")[colnames(meth_genes_mat),c("Group_Sex","Group_Complexity_Fac")],
+         show_rownames = F,show_colnames = F
+        )
+
+#see key genes
+
+ggplot(meth_genes[gene%in%c("SOCS3","HES1","JUN")])+
+geom_boxplot(aes(x=Group_Sex,y=gene_meth))+facet_wrap("gene")
+
+#res
+res<-fread("../methyl/outputs/model14_without_iugr/2020-10-08_all_res_with_perm.csv")
+resg<-unique(res[order(gene,pval)],by="gene")
+ggplot(resg)+geom_density(aes(x=GeneScore))+facet_wrap("compa")
+
+resg[,gs_scaled:=scale(GeneScore,center=F),by="compa"]
+ggplot(resg)+geom_density(aes(x=gs_scaled))+facet_wrap("compa")
+
+p1<-ggplot(resg[compa%in%c("C.L","CF.LF","CM.LM")],aes(x=compa,y=gs_scaled))+
+  geom_jitter(aes(col=abs(gs_scaled)>1))+
+  scale_color_manual(values = c("grey","red"))+
+  geom_boxplot(aes(fill=compa),outlier.shape = NA)
+
+p2<-ggplot(resg[compa%in%c("C.L","CF.LF","CM.LM")][abs(gs_scaled)>1][,hyper_meth:=gs_scaled>0])+geom_bar(aes(x=compa,fill=hyper_meth))
+p1+p2
