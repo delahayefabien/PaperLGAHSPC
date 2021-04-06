@@ -116,48 +116,12 @@ dim(meth_genes_mat)
 pheatmap(meth_genes_mat,
          annotation_col = data.frame(mtd,row.names = "sample")[colnames(meth_genes_mat),c("Group_Sex","Group_Complexity_Fac")],
          show_rownames = F,show_colnames = F
-        )
-
-#top1000 sd Ctrl LGA samples
-meth_genes<-merge(meth_genes,mtd,by="sample")
-meth_genes_cl<-meth_genes[Group_name%in%c("C","L")]
-meth_genes_cl[,sd:=sd(gene_meth_scaled),by="gene"]
-meth_genes_cl[,top1000:=sd>=sort(sd,decreasing = T)[1000],by="sample"]
-pheatmap(meth_genes_mat[rownames(meth_genes_mat)%in%unique(meth_genes_cl[top1000==T]$gene),unique(meth_genes_cl$sample)],
-         annotation_col = data.frame(mtd,row.names = "sample")[unique(meth_genes_cl$sample),c("Group_name","Gender","Library_Complexity")],
-         show_rownames = F,show_colnames = F
-        )
-
-meth_genes_cl[Group_Complexity_Fac==4,sd.complex:=sd(gene_meth_scaled),by="gene"]
-meth_genes_cl[,top1000.complex:=sd.complex>=sort(sd.complex,decreasing = T)[1000],by="sample"]
-
-pheatmap(meth_genes_mat[rownames(meth_genes_mat)%in%unique(meth_genes_cl[top1000.complex==T]$gene),unique(meth_genes_cl$sample)],
-         annotation_col = data.frame(mtd,row.names = "sample")[unique(meth_genes_cl$sample),c("Group_name","Gender","Library_Complexity")],
-         show_rownames = F,show_colnames = F
-        )
-
-
-#hi conf genes
-meth_df[,hi.conf.genes:=sum(cpg_weight>=1.5)>5,by=c("sample","gene")]
-
-meth_genes_hi<-unique(meth_df,by=c("sample","gene"))[hi.conf.genes==T]
-meth_genes_mat_hi<-dcast(meth_genes_hi[,-c("locisID","methylation","hi.conf.genes")],sample~gene)
-meth_genes_mat_hi[1:10,1:10]
-
-meth_genes_mat_hi<-as.matrix(data.frame(meth_genes_mat_hi,row.names = "sample"))
-meth_genes_mat_hi<-t(meth_genes_mat_hi)
-meth_genes_mat_hi[1:10,1:10]
-dim(meth_genes_mat_hi)
-
-
-pheatmap(meth_genes_mat_hi,
-         annotation_col = data.frame(mtd,row.names = "sample")[colnames(meth_genes_mat),c("Group_Sex","Group_Complexity_Fac")],
-         show_rownames = F,show_colnames = F
-        )
+        ) #doesn work
+#see other test on figures_paper_methyl_annexe
 
 #see key genes
 
-ggplot(meth_genes[gene%in%c("SOCS3","HES1","JUN")])+
+ggplot(meth_genes[gene%in%c("SOCS3","HES1","JUN")&Group_name%in%c("C","L")])+
 geom_boxplot(aes(x=Group_Sex,y=gene_meth))+facet_wrap("gene")
 
 #res
@@ -175,3 +139,74 @@ p1<-ggplot(resg[compa%in%c("C.L","CF.LF","CM.LM")],aes(x=compa,y=gs_scaled))+
 
 p2<-ggplot(resg[compa%in%c("C.L","CF.LF","CM.LM")][abs(gs_scaled)>1][,hyper_meth:=gs_scaled>0])+geom_bar(aes(x=compa,fill=hyper_meth))
 p1+p2
+
+
+#Integration basal
+source("../methyl/scripts/utils/new_utils.R")
+library(Seurat)
+
+out<-"../methyl/outputs/figures_paper_meth"
+
+  #Lineage bias
+cbps<-readRDS("../singlecell/outputs/02-hematopo_datasets_integration/cbps0-8_clean/cbps0-8_clean.rds")
+mtd<-data.table(cbps@meta.data,keep.rownames ="bc")
+mtd[,n.sample:=.N,by=c("sample","orig.ident")]
+mtd[,pct.ct:=.N/n.sample,by=c("sample","orig.ident","cell_type")]
+mtd[,pct.lin:=.N/n.sample,by=c("sample","orig.ident","lineage")]
+
+cbps_cl<-subset(cbps,hto==F&group%in%c("ctrl","lga")&ambigous==F&orig.ident!="cd34_hto1_0C1I1L")
+mtd_cl<-mtd[hto==F&group%in%c("ctrl","lga")&ambigous==F&orig.ident!="cd34_hto1_0C1I1L"]
+
+
+
+ggplot(unique(mtd_cl[!str_detect(lineage,"unknown")][,.SD,.SDcols=unique(colnames(mtd))],by=c("sample","orig.ident","lineage")))+
+  geom_boxplot(aes(x=group,y=pct.lin,fill=group))+facet_wrap("lineage",scales = "free")
+
+
+
+  #DEGs
+degs_cl<-fread("outputs/08-DEGs_LGA_no_stress/pseudobulk_deseq2_all_cbps/res_de_analysis_all_genes.csv")
+
+ggplot(degs_cl,aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldChange)>0.6))+
+  geom_point()+ 
+  geom_label_repel(aes(label = ifelse(padj<0.1&
+                                        abs(log2FoldChange)>0.6,gene,"")),
+                   max.overlaps=3000,
+                   box.padding   = 0.35,
+                   point.padding = 0.5,
+                   segment.color = 'grey50')+
+  scale_color_manual(values = c("grey","red")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+#by lineage
+degs_lin<-fread("../singlecell/outputs/08-DEGs_LGA_no_stress/pseudobulk_deseq2_by_lin/res_de_analysis_all_genes.csv")
+ggplot(degs_lin,aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldChange)>0.6))+
+  geom_point()+ 
+  geom_label_repel(aes(label = ifelse(padj<0.1&
+                                        abs(log2FoldChange)>0.6,gene,"")),
+                   max.overlaps=3000,
+                   box.padding   = 0.35,
+                   point.padding = 0.5,
+                   segment.color = 'grey50')+
+  scale_color_manual(values = c("grey","red")) +
+  facet_wrap("lineage")+
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+#single cell
+
+degs_cl_sc<-fread("outputs/08-DEGs_LGA_no_stress/sc_edger_deseq2_all_cbps/res_de_analysis_all_genes.csv")
+
+degs_cl_sc[p_val_adj<0.01&abs(avg_logFC)>0.6]
+
+ggplot(degs_cl_sc,aes(x=avg_logFC,y=-log10(p_val),col=p_val_adj<0.1&abs(avg_logFC)>0.6))+
+  geom_point()+
+  scale_color_manual(values = c("grey","red")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+
+
+#correl scdegs with methyl
+
