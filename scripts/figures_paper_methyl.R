@@ -194,7 +194,7 @@ ggplot(degs_lin,aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldC
   theme_minimal() +
   theme(legend.position = "bottom")
 
-#single cell
+#single cell degs
 
 degs_cl_sc<-fread("outputs/08-DEGs_LGA_no_stress/sc_edger_deseq2_all_cbps/res_de_analysis_all_genes.csv")
 
@@ -209,4 +209,68 @@ ggplot(degs_cl_sc,aes(x=avg_logFC,y=-log10(p_val),col=p_val_adj<0.1&abs(avg_logF
 
 
 #correl scdegs with methyl
+
+res_cl<-fread("../methyl/outputs/model14_without_iugr/2020-09-16_res_C.L_with_GeneScore_and_permut.csv")
+
+res_cl[gene=="HES1"]
+
+res_cl_merge<-merge(degs_cl_sc,res_cl)
+res_cl_merge<-unique(res_cl_merge,by="gene")
+ggplot(res_cl_merge) + geom_point(aes(x=-log10(p_val_adj)*avg_logFC,y=GeneScore))
+ggplot(res_cl_merge) + geom_point(aes(x=avg_logFC,y=GeneScore))
+
+#Over repre test GO BP and KEGG pathway
+
+res_cl_merge[,gs_scaled:=scale(GeneScore,center = F)]
+ggplot(res_cl_merge)+geom_density(aes(x=gs_scaled))
+ggplot(res_cl_merge)+geom_density(aes(x=avg_logFC))
+
+res_cl_merge[,correl:=ifelse(gs_scaled>1&avg_logFC>1,"Hypermet-Upreg",
+                             ifelse(gs_scaled>1&avg_logFC<(-1),"Hypermet-Downreg",
+                              ifelse(gs_scaled<(-1)&avg_logFC<(-1),"Hypomet-Downreg",
+                               ifelse(gs_scaled<(-1)&avg_logFC>1,"Hypomet-Upreg","no change"))))]
+ggplot(res_cl_merge) + geom_point(aes(x=avg_logFC,y=gs_scaled,col=correl))
+
+#kegg
+pathways<-read.gmt("../methyl/ref/msigdb/c2.cp.kegg.v7.1.symbols.gmt")
+pathways_list<-split(pathways$gene,f = pathways$term)
+
+res_kegg<-over_repr_test_multi(genes_of_interest =res_cl_merge[correl=="Hypermet-Upreg"]$gene ,
+                     terms_list = pathways_list ,
+                     size_universe = nrow(res_cl_merge)
+                    )
+
+res_kegg[padj<0.5]#0
+
+#with hypermet-downreg
+res_kegg2<-over_repr_test_multi(genes_of_interest =res_cl_merge[correl=="Hypermet-Downreg"]$gene ,
+                     terms_list = pathways_list ,
+                     size_universe = nrow(res_cl_merge)
+                    )
+
+res_kegg2[padj<0.5]#0
+
+
+#GO
+go_term<-read.gmt("../methyl/ref/msigdb/c5.go.bp.v7.3.symbols.gmt")
+go_list<-split(go_term$gene,f = go_term$term)
+
+res_go<-over_repr_test_multi(genes_of_interest =res_cl_merge[correl=="Hypermet-Upreg"]$gene ,
+                     terms_list = go_list ,
+                     size_universe = nrow(res_cl_merge)
+                    )
+
+res_go[padj<0.5]#0
+#with hypermet-downreg
+res_go<-over_repr_test_multi(genes_of_interest =res_cl_merge[correl=="Hypermet-Downreg"]$gene ,
+                     terms_list = go_list ,
+                     size_universe = nrow(res_cl_merge)
+                    )
+
+res_go[padj<0.5]#0
+
+
+#GSEA
+
+summary(lm(res_cl_merge$avg_logFC~res_cl_merge$GeneScore))
 
