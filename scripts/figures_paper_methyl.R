@@ -270,7 +270,33 @@ res_go<-over_repr_test_multi(genes_of_interest =res_cl_merge[correl=="Hypermet-D
 res_go[padj<0.5]#0
 
 
-#GSEA
-
+#GSEA [to do]
+#score correl by gene = distance fold change obs with fold change calc ~ linear regression
 summary(lm(res_cl_merge$avg_logFC~res_cl_merge$GeneScore))
+#a = -0.0005153
+#b=  -0.0162490
 
+PredFoldChange<-function(gene_score,a=-0.0005153,b=-0.0162490)a*gene_score+b
+PredFoldChange(300)
+res_cl_merge[,avg_logFC_pred:=PredFoldChange(GeneScore)]
+ggplot(res_cl_merge)+geom_point(aes(x=GeneScore,y=avg_logFC_pred))
+res_cl_merge[,avg_logFC_dist:=abs(avg_logFC_pred-avg_logFC)]
+res_cl_merge[order(avg_logFC_dist)]
+#doesnt worj because correl based on data
+
+#INTEGR WITH STRRESS
+#validation genescore
+res_de<-rbind(fread("../singlecell/outputs/08-DEGs_LGA_no_stress/pseudobulk_deseq2_all_cbps/res_de_analysis_all_genes.csv")[,condition:="basale"],
+              fread("../singlecell/outputs/07-DEGs_LGA_stress/pseudobulk_deseq2_all_cbps/res_de_analysis_all_genes.csv")[,condition:="stress"])
+
+res_cl_merge<-merge(res_de,res_cl,allow.cartesian=TRUE)
+
+ggplot(res_cl_merge)+geom_boxplot(aes(x=padj<0.1,y=GeneScore))+facet_wrap("condition")          
+
+
+res_de_sc<-rbind(fread("../singlecell/outputs/08-DEGs_LGA_no_stress/sc_edger_deseq2_all_cbps/res_de_analysis_all_genes.csv")[,condition:="basale"],
+              fread("../singlecell/outputs/07-DEGs_LGA_stress/sc_edger_deseq2_all_cbps/res_de_analysis_all_genes.csv")[,condition:="stress"])
+
+res_cl_sc_merge<-merge(res_de_sc,res_cl,allow.cartesian=TRUE)
+
+ggplot(res_cl_sc_merge)+geom_boxplot(aes(x=p_val_adj<0.1,y=GeneScore))+facet_wrap("condition")          
