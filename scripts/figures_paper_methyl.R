@@ -147,9 +147,13 @@ cbps_cl<-subset(cbps,hto==F&group%in%c("ctrl","lga")&ambigous==F&orig.ident!="cd
 mtd_cl<-data.table(cbps_cl@meta.data,keep.rownames ="bc")
 mtd_cl[,n.sample:=.N,by=c("sample","orig.ident")]
 mtd_cl[,pct.ct:=.N/n.sample,by=c("sample","orig.ident","cell_type")]
-mtd_cl[,pct.lin:=.N/n.sample,by=c("sample","orig.ident","lineage")]
-ggplot(unique(mtd_cl[!str_detect(lineage,"unknown")][,.SD,.SDcols=unique(colnames(mtd_cl))],by=c("sample","orig.ident","lineage")))+
-  geom_boxplot(aes(x=group,y=pct.lin,fill=group))+facet_wrap("lineage",scales = "free")
+mtd_cl[,pct.lin:=.N/n.sample,by=c("sample","orig.ident","lineage1")]
+
+lineages<-c("HSC","MPP","Erythroid","Lymphoid","Myeloid","LMPP")
+
+
+ggplot(unique(mtd_cl[lineage1%in%lineages][,.SD,.SDcols=unique(colnames(mtd_cl))],by=c("sample","orig.ident","lineage1")))+
+  geom_boxplot(aes(x=group,y=pct.lin,fill=group))+facet_wrap("lineage1",scales = "free")
 
 
   #DEGs
@@ -241,9 +245,9 @@ cbps_clh<-subset(cbps,hto==T&group%in%c("ctrl","lga")&ambigous==F&orig.ident!="c
 mtd_clh<-data.table(cbps_clh@meta.data,keep.rownames ="bc")
 mtd_clh[,n.sample:=.N,by=c("sample","orig.ident")]
 mtd_clh[,pct.ct:=.N/n.sample,by=c("sample","orig.ident","cell_type")]
-mtd_clh[,pct.lin:=.N/n.sample,by=c("sample","orig.ident","lineage")]
-ggplot(unique(mtd_clh[!str_detect(lineage,"unknown")][,.SD,.SDcols=unique(colnames(mtd_clh))],by=c("sample","orig.ident","lineage")))+
-  geom_boxplot(aes(x=group,y=pct.lin,fill=group))+facet_wrap("lineage",scales = "free")
+mtd_clh[,pct.lin:=.N/n.sample,by=c("sample","orig.ident","lineage1")]
+ggplot(unique(mtd_clh[lineage1%in%lineages][,.SD,.SDcols=unique(colnames(mtd_clh))],by=c("sample","orig.ident","lineage1")))+
+  geom_boxplot(aes(x=group,y=pct.lin,fill=group))+facet_wrap("lineage1",scales = "free")
 
 #correl scdegs with methyl
 res_cl<-fread("../methyl/outputs/model14_without_iugr/2020-09-16_res_C.L_with_GeneScore_and_permut.csv")
@@ -275,7 +279,7 @@ genes_growth<-tr(as.data.frame(res_keggh)["hsa04935","geneID"],tradEntrezInSymbo
 res_keggh_dt<-data.table(as.data.frame(res_keggh))
 res_keggh_dt[,gene:=paste(tr(geneID,tradEntrezInSymbol = T),collapse = "|"),by="ID"]
 res_keggh_dt[str_detect(gene,"HES1")]
-genes_of_interest<-union(genes_wnt,genes_growth)
+
 #HSC specific
 DefaultAssay(cbps_clh)<-"SCT"
 Idents(cbps_clh)<-"lineage"
@@ -287,8 +291,175 @@ FeaturePlot(cbps_clh,features ="JUN",label=T )
 FeaturePlot(cbps_clh,features ="FOS",label=T )
 FeaturePlot(cbps_clh,features ="HES1",label=T ,max.cutoff = "q95")
 
-#run
-degs_clh_ps_lin<-fread("../singlecell/outputs/07-DEGs_LGA_stress/pseudobulk_deseq2_by_lin/res_de_analysis_all_genes.csv")
-table(degs_clh_ps_lin[padj<0.05]$lineage)
+#degs by lineage
+#pseudo bulk
 
-ggplot(degs_clh_ps_lin[padj<0.05])+geom_bar(aes(x=lineage,fill=lineage))
+#in basal
+degs_cl_ps_lin1<-fread("../singlecell/outputs/08-DEGs_LGA_no_stress/pseudobulk_deseq2_by_lineage1/res_de_analysis_all_genes.csv")
+
+ggplot(degs_cl_ps_lin1[padj<0.1&abs(log2FoldChange)>0.6])+geom_bar(aes(x=lineage,fill=lineage))
+
+ggplot(degs_cl_ps_lin1)+
+  geom_point(aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.05&abs(log2FoldChange)>0.6),size=0.2)+
+               facet_wrap("lineage")+
+               scale_color_manual(values = c("grey","red"))
+
+ggplot(degs_cl_ps_lin1,aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldChange)>0.6))+
+  geom_point(size=0.2)+ 
+  geom_label_repel(aes(label = ifelse(padj<0.1&
+                                        abs(log2FoldChange)>0.6&
+                                        gene%in%union(genes_wnt,genes_growth),gene,"")),
+                   max.overlaps=3000,
+                   segment.color = 'grey50')+
+               scale_color_manual(values = c("grey","red"))+
+  facet_wrap("lineage")
+
+
+genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
+                      "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",                        "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC")
+
+p1<-ggplot(degs_clh_ps_lin1[lineage%in%c("HSC")],aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldChange)>0.6))+
+  geom_point()+ 
+  geom_label_repel(aes(label = ifelse(padj<0.1&
+                                        abs(log2FoldChange)>0.6&
+                                        gene%in%genes_of_interest,gene,"")),
+                   max.overlaps=3000,
+                   segment.color = 'grey50')+
+               scale_color_manual(values = c("grey","red"))
+
+
+p2<-ggplot(degs_clh_ps_lin1[lineage%in%c("MPP")],aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldChange)>0.6))+
+  geom_point(si)+ 
+  geom_label_repel(aes(label = ifelse(padj<0.1&
+                                        abs(log2FoldChange)>0.6&
+                                        gene%in%genes_of_interest,gene,"")),
+                   max.overlaps=3000,
+                   segment.color = 'grey50')+
+               scale_color_manual(values = c("grey","red"))
+
+p1+p2+plot_layout(guides = "collect")
+
+#in hto
+degs_clh_ps_lin<-fread("../singlecell/outputs/07-DEGs_LGA_stress/pseudobulk_deseq2_by_lin/res_de_analysis_all_genes.csv")
+ggplot(degs_clh_ps_lin[padj<0.1&abs(log2FoldChange)>0.6])+geom_bar(aes(x=lineage,fill=lineage))
+
+ggplot(degs_clh_ps_lin)+
+  geom_point(aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.05&abs(log2FoldChange)>0.6),size=0.2)+
+               facet_wrap("lineage")+
+               scale_color_manual(values = c("grey","red"))
+
+ggplot(degs_clh_ps_lin,aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldChange)>0.6))+
+  geom_point(size=0.2)+ 
+  geom_label_repel(aes(label = ifelse(padj<0.1&
+                                        abs(log2FoldChange)>0.6&
+                                        gene%in%union(genes_wnt,genes_growth),gene,"")),
+                   max.overlaps=3000,
+                   segment.color = 'grey50')+
+               scale_color_manual(values = c("grey","red"))+
+  facet_wrap("lineage")
+
+
+genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
+                      "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",                        "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC")
+
+p1<-ggplot(degs_clh_ps_lin[lineage%in%c("HSC")],aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldChange)>0.6))+
+  geom_point()+ 
+  geom_label_repel(aes(label = ifelse(padj<0.1&
+                                        abs(log2FoldChange)>0.6&
+                                        gene%in%genes_of_interest,gene,"")),
+                   max.overlaps=3000,
+                   segment.color = 'grey50')+
+               scale_color_manual(values = c("grey","red"))
+
+
+p2<-ggplot(degs_clh_ps_lin[lineage%in%c("MPP")],aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldChange)>0.6))+
+  geom_point()+ 
+  geom_label_repel(aes(label = ifelse(padj<0.1&
+                                        abs(log2FoldChange)>0.6&
+                                        gene%in%genes_of_interest,gene,"")),
+                   max.overlaps=3000,
+                   segment.color = 'grey50')+
+               scale_color_manual(values = c("grey","red"))
+
+p1+p2+plot_layout(guides = "collect")
+
+#degs by lineage1
+#pseudo bulk
+degs_clh_ps_lin1<-fread("../singlecell/outputs/07-DEGs_LGA_stress/pseudobulk_deseq2_by_lineage1/res_de_analysis_all_genes.csv")
+
+table(degs_clh_ps_lin1[padj<0.05]$lineage)
+
+ggplot(degs_clh_ps_lin1[padj<0.1&abs(log2FoldChange)>0.6])+geom_bar(aes(x=lineage,fill=lineage))
+
+ggplot(degs_clh_ps_lin1)+
+  geom_point(aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.05&abs(log2FoldChange)>0.6),size=0.2)+
+               facet_wrap("lineage")+
+               scale_color_manual(values = c("grey","red"))
+
+ggplot(degs_clh_ps_lin1,aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldChange)>0.6))+
+  geom_point(size=0.2)+ 
+  geom_label_repel(aes(label = ifelse(padj<0.1&
+                                        abs(log2FoldChange)>0.6&
+                                        gene%in%union(genes_wnt,genes_growth),gene,"")),
+                   max.overlaps=3000,
+                   segment.color = 'grey50')+
+               scale_color_manual(values = c("grey","red"))+
+  facet_wrap("lineage")
+
+
+genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
+                      "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",                        "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC")
+
+p1<-ggplot(degs_clh_ps_lin1[lineage%in%c("HSC")],aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldChange)>0.6))+
+  geom_point()+ 
+  geom_label_repel(aes(label = ifelse(padj<0.1&
+                                        abs(log2FoldChange)>0.6&
+                                        gene%in%genes_of_interest,gene,"")),
+                   max.overlaps=3000,
+                   segment.color = 'grey50')+
+               scale_color_manual(values = c("grey","red"))
+
+
+p2<-ggplot(degs_clh_ps_lin1[lineage%in%c("MPP")],aes(x=log2FoldChange,y=-log10(pvalue),col=padj<0.1&abs(log2FoldChange)>0.6))+
+  geom_point(si)+ 
+  geom_label_repel(aes(label = ifelse(padj<0.1&
+                                        abs(log2FoldChange)>0.6&
+                                        gene%in%genes_of_interest,gene,"")),
+                   max.overlaps=3000,
+                   segment.color = 'grey50')+
+               scale_color_manual(values = c("grey","red"))
+
+p1+p2+plot_layout(guides = "collect")
+#scDEGs
+
+
+#SCENIC
+
+cbps<-readRDS("outputs/06-SCENIC/cbps0-8_clean/all_cbps_with_regulons_activity.rds")
+tf_lin<-fread("outputs/06-SCENIC/cbps0-8_clean/tf_markers_lineage.csv.gz")
+tf_lin[lineage=="Erythroid"]
+DefaultAssay(cbps)<-"TF_AUC"
+FeaturePlot(cbps,"GATA1",label = T)
+
+tf_lin[lineage=="Myeloid"]$regulon
+FeaturePlot(cbps,"CEBPA",label = T)
+
+tf_lin[lineage=="Lymphoid"]
+tf_lin[lineage=="Lymphoid"&avg_log2FC>0]
+FeaturePlot(cbps,"IRF8",label = T,min.cutoff = 0.2,max.cutoff = 0.4)
+
+tf_lin[lineage=="HSC"&avg_log2FC>0]
+tf_lin[lineage=="HSC"&avg_log2FC>0]$regulon
+FeaturePlot(cbps,c("EGR1","FOSB","JUN","STAT3"),label = T,min.cutoff = 0.1,max.cutoff = 0.6,pt.size = 0.1
+            )
+
+tf_lin[lineage=="MPP"&avg_log2FC>0]
+tf_lin[lineage=="MPP"&avg_log2FC>0]$regulon
+FeaturePlot(cbps,c("MEIS1e"),label = T,min.cutoff = 0.1,max.cutoff = 0.5,pt.size = 0.2)
+
+
+#tf_bias_b<-#[to do]
+#tf_bias_b[regulon%in%c("STAT3","JUN","MEIS1e","SPI1","EBF")&p_val_adj<0.001]
+
+tf_bias_h<-fread("outputs/06-SCENIC/cbps0-8_clean/regulon_activity_after_stress_lga_vs_ctrl_by_lineage.csv.gz")
+tf_bias_h[regulon%in%c("STAT3","JUN","MEIS1e","SPI1","EBF")&p_val_adj<0.001]

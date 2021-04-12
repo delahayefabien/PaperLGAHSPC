@@ -176,8 +176,13 @@ ggplot(res_or_all[padj<0.001&compa=="CF.LF"&!str_detect(regulon,"e$")])+
   geom_point(aes(x=regulon,y=pct.enriched,size=regulon.size,col=-log10(padj)))+
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 9),
         axis.title=element_text(size=12,face="bold"))
+ggplot(res_or_all[padj<0.001&compa=="C.L"&!str_detect(regulon,"e$")])+
+  geom_point(aes(x=regulon,y=pct.enriched,size=regulon.size,col=-log10(padj)))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 9),
+        axis.title=element_text(size=12,face="bold"))
 
 fwrite(res_or_all,fp(out,"res_over_repr_by_compa_genescore_scaled_thr1.25.csv.gz"),sep=";")
+res_or_all<-fread(fp(out,"res_over_repr_by_compa_genescore_scaled_thr1.25.csv.gz"),sep=";")
 
 #pca on the cpgs determining TF
 
