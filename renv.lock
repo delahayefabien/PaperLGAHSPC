@@ -4,7 +4,7 @@
     "Repositories": [
       {
         "Name": "CRAN",
-        "URL": "https://mran.microsoft.com/snapshot/2021-02-22"
+        "URL": "https://cloud.r-project.org"
       }
     ]
   },
@@ -1510,14 +1510,8 @@
     "miniUI": {
       "Package": "miniUI",
       "Version": "0.1.1.1",
-      "Source": "CRAN",
+      "Source": "Repository",
       "Repository": "CRAN",
-      "RemoteType": "standard",
-      "RemotePkgRef": "miniUI",
-      "RemoteRef": "miniUI",
-      "RemoteRepos": "https://cloud.r-project.org/",
-      "RemotePkgType": "source",
-      "RemoteSha": "0.1.1.1",
       "Hash": "fec5f52652d60615fdb3957b3d74324a"
     },
     "multtest": {
