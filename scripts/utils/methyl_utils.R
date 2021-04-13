@@ -1,6 +1,108 @@
 
 
+#QC
+
+deterPctTrueZeroLocis<-function(matCpG){
+  #parmi les locis avec pct0>, quelle pct de locis avec vrais zeros ?
+  #1) remplace NA par 0
+  matCpG[is.na(matCpG)]<-0
+  #2) recupÃ¨re mat avec plus de 35% de 0 dans locis
+  matCpG<-matCpG[((rowSums(matCpG==0)/ncol(matCpG))>0.35),]
+  pctLocisAvecVraisZeros<-sum(rowSums(matCpG>0&matCpG<5)>0)/nrow(matCpG)
+  print(paste("pct Locis avec Vrais zeros =",round(pctLocisAvecVraisZeros,3)))
+  return(pctLocisAvecVraisZeros)
+}
+
+deterCorrelWithLibraryComplex<-function(mat,mtd,covarNum="Group_Complexity",pcTestes=5){
+  #quelle corralation avec library complexity?
+  
+  mat[is.na(mat)]<-0
+  if(nrow(mat)>100000){
+      mat<-mat[sample(1:nrow(mat),100000),]
+    }
+  pca<-prcomp(t(mat))
+  pc<-pca$x
+  library<-as.numeric(data.frame(mtd,row.names = "sample")[rownames(pc),covarNum])
+  
+  correl_score_max<-0
+  
+  for (i in 1:pcTestes){
+    
+    resLm<-lm(pc[,i]~library)
+    p<-anova(resLm)$Pr[1]
+    r2<-summary(resLm)$adj.r.squared
+    pctPC<-round(pca$sd[i]^2/sum(pca$sdev^2),3)
+    correl_score<-(-log10(p))*r2/pctPC
+    
+    if(correl_score>correl_score_max){
+      correl_score_max<-correl_score
+    
+    }else{
+      return(correl_score_max)}
+    
+  }
+  
+  
+
+  
+  return(res)
+  
+}
+
+deterSeuilQC<-function(dataCpG,metrique,mtd,qTestes,qualMetriques=c(1,2),test="quantile",lowerThan=T){
+  require(stringr)
+  samples<-names(dataCpG)[str_detect(names(dataCpG),"CBP")]
+  if (1%in% qualMetriques){
+    quals<-rep(0,length(qTestes))
+  }
+  if (2%in% qualMetriques){
+    quals2<-rep(0,length(qTestes))
+  }
+  
+  print(paste("determine si",metrique,"peut permettre d'exclure des locis de faible confiance"))
+  for (i in 1:length(qTestes)){
+    q<-qTestes[i]
+    print(paste("seuil",q))
+    if(test=="quantile"){
+      q<-quantile(dataCpG[,metrique],q,na.rm=T)
+      
+    }
+    if(lowerThan){
+      locisLo<-na.exclude(rownames(dataCpG)[dataCpG[,metrique]<=q])
+      print(paste("analyses qualitÃ© des",length(locisLo),"locis avec",metrique,"<",q))
+    }else{
+      locisLo<-na.exclude(rownames(dataCpG)[dataCpG[,metrique]>=q])
+      print(paste("analyses qualitÃ© des",length(locisLo),"locis avec",metrique,">",q))
+    }
+    
+    
+    
+    if(length(locisLo)>100000){
+      locisLo<-sample(locisLo,100000)
+    }
+    dataCpGLo<-as.matrix(dataCpG[locisLo,samples])
+    
+    if (1%in% qualMetriques){
+      quals[i]<-deterPctTrueZeroLocis(dataCpGLo)
+    }
+    
+    
+    if (2%in% qualMetriques){
+      quals2[i]<-deterCorrelWithLibraryComplex(dataCpGLo,mtd)
+  
+    }
+    
+  }
+  
+  print(plot(qTestes,quals,main=paste('pctLocis Avec Vrais Zeros en fonction',metrique)))
+  print(plot(qTestes,quals2,main=paste('correl score PC~library',metrique),log="y"))
+  return(list(pct_true_zero_locis=quals,correl_score=quals2))
+}
+
+
+
 ##function explor data before modeling
+
 pctPC<-function(pca,rngPCs="all"){
   if(is.character(rngPCs)){
     rngPCs<-1:length(pca$sdev)
