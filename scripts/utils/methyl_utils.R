@@ -121,25 +121,35 @@ plotPCVarExplain<-function(pca,rngPCs,lineSeuilPct=1,returnPCSeuils=T){
   
 }
 
-CorrelCovarPCs<-function(pca,rngPCs,batch,var_num,var_fac,exclude=NULL,res="pval",seuilP=0.1,return=FALSE,plot=TRUE){
-  pc<-data.frame(pca$x)
-  if(is.data.table(batch)){
-    batch<-data.frame(batch,row.names = "sample")
-  }
-  batch_num=batch[rownames(pc),var_num]
+CorrelCovarPCs<-function(pca,mtd,vars_num=NULL,vars_fac=NULL,rngPCs=1:30,res="pval",seuilP=0.1,return=TRUE,plot=TRUE){
+  require(data.table)
   
-  batch_fac=batch[rownames(pc),var_fac]
-  batch_fac<-batch_fac[,sapply(batch_fac, function(x)length(unique(x))>1)]
-  batch_num=t(batch_num)
-  batch_fac=t(batch_fac)
-  split_num=split(batch_num,rownames(batch_num))
-  split_fac=split(batch_fac,rownames(batch_fac))
+  pcs<-data.frame(pca$x)
+  
+  if(is.null(vars_num))vars_num=colnames(mtd)[sapply(mtd, is.numeric)]
+  if(is.null(vars_fac))vars_fac=colnames(mtd)[!sapply(mtd, is.numeric)&colnames(mtd)!="sample"]
+  
+  mtd[,(vars_fac):=lapply(.SD,as.factor),.SDcols=vars_fac]
+  
+  if(is.data.table(mtd)){
+    mtd<-data.frame(mtd,row.names = "sample")
+  }
+  
+  mtd_num=mtd[rownames(pcs),vars_num]
+  mtd_fac=mtd[rownames(pcs),vars_fac]
+  
+  mtd_fac<-mtd_fac[,sapply(mtd_fac, function(x)length(levels(x))>1)]
+  
+  mtd_num=t(mtd_num)
+  mtd_fac=t(mtd_fac)
+  split_num=split(mtd_num,rownames(mtd_num))
+  split_fac=split(mtd_fac,rownames(mtd_fac))
   res_num=lapply(split_num,function(x,ret=res){
     FAC1.p<-rep(0,length(rngPCs))
     FAC1.r2<-rep(0,length(rngPCs))
     for (i in rngPCs){
       FAC1<-as.numeric(x)
-      FAC1<-lm(pc[,i]~FAC1)
+      FAC1<-lm(pcs[,i]~FAC1)
       FAC1.p[i]<-anova(FAC1)$Pr[1]
       FAC1.r2[i]<-summary(FAC1)$adj.r.squared
     }
@@ -155,7 +165,7 @@ CorrelCovarPCs<-function(pca,rngPCs,batch,var_num,var_fac,exclude=NULL,res="pval
     FAC1.r2<-rep(0,length(rngPCs))
     for (i in rngPCs){
       FAC1<-as.factor(x)
-      FAC1<-lm(pc[,i]~FAC1)
+      FAC1<-lm(pcs[,i]~FAC1)
       FAC1.p[i]<- anova(FAC1)$Pr[1]
       FAC1.r2[i]<-summary(FAC1)$adj.r.squared
     }
@@ -169,22 +179,24 @@ CorrelCovarPCs<-function(pca,rngPCs,batch,var_num,var_fac,exclude=NULL,res="pval
   res.num<-do.call(rbind,res_num)
   res.fac<-do.call(rbind,res_fac)
   final_res<-rbind(res.num,res.fac)
-  res2<-data.matrix(final_res)
+  final_res<-data.matrix(final_res)
   if(plot){
-    library(pheatmap)
+    require(pheatmap)
+    resToPlot<-final_res
   if(res=="pval"){
-    res2[which(res2>seuilP)]<-1 ####here I basicaly put them to 1 if less than 0.1
-    resToPlot<--log10(res2)
+    
+    resToPlot[which(resToPlot>seuilP)]<-1 ####here I basicaly put them to 1 if less than 0.1
+    resToPlot<--log10(resToPlot)
     breakRes<-c(40,20,10:1, 0.5,0.1)
   }else{
-    res2[res2<0]<-0
-    resToPlot<-res2
+    resToPlot[resToPlot<0]<-0
+    resToPlot<-resToPlot
     breakRes<-NA
     
   }
   
   pct.varPCs<-pctPC(pca,rngPCs)*100
-  vars<-rownames(resToPlot)[!(rownames(resToPlot)%in%exclude)]
+  vars<-rownames(resToPlot)
   
   pheatmap(resToPlot[vars,rngPCs],cluster_rows = F,cluster_cols = F,
            labels_col= paste0("PC",rngPCs,"(",round(pct.varPCs[as.character(rngPCs)],0),"%)"),
@@ -196,13 +208,28 @@ CorrelCovarPCs<-function(pca,rngPCs,batch,var_num,var_fac,exclude=NULL,res="pval
   
   
   if(return){
-    colnames(res2)<-paste0("PC",rngPCs)
-   return(res2) 
+    colnames(final_res)<-paste0("PC",rngPCs)
+   return(final_res) 
   }
   
   
   
 }
+
+
+plotPvalsHeatMap(pvals_mat,p.thr=0.1,col_breaks<-c(40,20,10:1, 0.5,0.1),cluster_rows = F,cluster_cols = F){
+    require(pheatmap)
+    
+    pvals_mat[which(pvals_mat>p.thr)]<-1 #### put them to 1 if less than 0.1
+    pvals_mat<--log10(pvals_mat)
+  
+    vars<-rownames(pvals_mat)
+  
+    pheatmap(resToPlot,cluster_rows = cluster_rows,cluster_cols = cluster_cols,
+             display_numbers = T,
+             color = colorRampPalette(c("white", "red"))(13), breaks = col_breaks)
+  
+  }
 
 
 correl<-function(x,y,ret="all",verbose=T){
@@ -559,7 +586,7 @@ plotMeth<-function(cpgs,
                    factor="Group_Sex",
                    levels=c("C_F","C_M","L_F","L_M"),
                    methyl_df=NULL,
-                   batch=NULL,
+                   mtd=NULL,
                    plot="boxplot",
                    group="locisID",
                    wrap=FALSE){
@@ -568,11 +595,11 @@ plotMeth<-function(cpgs,
   if(is.null(methyl_df)){
     methyl_df<-fread("datasets/cd34/2020-05-25_methyl_data_before_limma.csv")
   }
-  if(is.null(batch)){
-    batch<-fread("datasets/cd34/cleaned_batch_CD34_library_date_220620.csv")
+  if(is.null(mtd)){
+    mtd<-fread("datasets/cd34/cleaned_mtd_CD34_library_date_220620.csv")
     
-    keep<-batch[[factor]]%in%levels
-    batch<-batch[as.vector(keep)]
+    keep<-mtd[[factor]]%in%levels
+    mtd<-mtd[as.vector(keep)]
   }
   
   if(is.data.table(cpgs)){
@@ -599,35 +626,35 @@ plotMeth<-function(cpgs,
         
         
         cpgs_data2<-cpgs_data2[!is.na(unmeth)]
-        cpgs_data_batch<-merge(cpgs_data2,batch[match(cpgs_data2$sample,sample)][!is.na(sample)],by="sample",allow.cartesian=TRUE)
+        cpgs_data_mtd<-merge(cpgs_data2,mtd[match(cpgs_data2$sample,sample)][!is.na(sample)],by="sample",allow.cartesian=TRUE)
         
         if(any(!is.na(dt))){
-          cpgs_data_batch<-merge(cpgs_data_batch,dt,by="locisID")
+          cpgs_data_mtd<-merge(cpgs_data_mtd,dt,by="locisID")
           
         }
         
-        ord<-as.character(unique(lapply(cpgs_data_batch[,.SD,.SDcols=group],sort)[[1]]))
+        ord<-as.character(unique(lapply(cpgs_data_mtd[,.SD,.SDcols=group],sort)[[1]]))
         
-        cpgs_data_batch[,(group):=lapply(.SD,function(x)factor(as.character(x),levels=ord)),.SDcols=group]
+        cpgs_data_mtd[,(group):=lapply(.SD,function(x)factor(as.character(x),levels=ord)),.SDcols=group]
         
         
         if(plot=="boxplot"){
           if(wrap){
-            return(ggplot(cpgs_data_batch)+
+            return(ggplot(cpgs_data_mtd)+
                      geom_boxplot(aes_string(factor,"unmeth",fill=factor),width=0.5)+
                      facet_wrap(group)+
               theme_minimal())
           }
-          return(ggplot(cpgs_data_batch)+geom_boxplot(aes_string(factor,"unmeth",fill=group))+scale_color_manual(breaks=as.character(ord)))
+          return(ggplot(cpgs_data_mtd)+geom_boxplot(aes_string(factor,"unmeth",fill=group))+scale_color_manual(breaks=as.character(ord)))
           
         }else if(plot=="jitter"){
           if(wrap){
-            return(ggplot(cpgs_data_batch,aes_string(group,"unmeth",col=factor))+
+            return(ggplot(cpgs_data_mtd,aes_string(group,"unmeth",col=factor))+
                      geom_jitter(width = 0.25)+facet_wrap(factor)+ 
                      stat_summary(fun.y=median, geom="point", size=2, color="red")+
                      theme_minimal())
           }else{
-            return(ggplot(cpgs_data_batch,aes_string(factor,"unmeth",color=group))+
+            return(ggplot(cpgs_data_mtd,aes_string(factor,"unmeth",color=group))+
                      geom_jitter(width = 0.25)+
                      stat_summary(fun.y=median, geom="point", size=2, color="red")+
                      scale_color_discrete(limits=as.character(ord))+
@@ -636,7 +663,7 @@ plotMeth<-function(cpgs,
           
           
         }else if(plot=="violin"){
-          return(ggplot(cpgs_data_batch,aes_string(factor,"unmeth",fill=group))+
+          return(ggplot(cpgs_data_mtd,aes_string(factor,"unmeth",fill=group))+
                    geom_violin()+
                    scale_fill_discrete(limits=as.character(ord))+
                    theme_minimal())
@@ -649,7 +676,7 @@ plotMeth<-function(cpgs,
 }
 
 
-RunMethAnalysis<-function(methyl_df,batch_filtered,formule,cpg.regs_ref,compas_df,sumToGene=FALSE,verbose=TRUE){
+RunMethAnalysis<-function(methyl_df,mtd_filtered,formule,cpg.regs_ref,compas_df,sumToGene=FALSE,verbose=TRUE){
   library(limma)
   
   if("data.table"%in%class(methyl_df)){
@@ -658,15 +685,15 @@ RunMethAnalysis<-function(methyl_df,batch_filtered,formule,cpg.regs_ref,compas_d
     print(head(methyl_df))
   }
   
-  if("data.table"%in%class(batch_filtered)){
-    print("transforming batch metadata in dataframe")
-    batch_F<-data.frame(batch_filtered)
-    print(head(batch_filtered))
+  if("data.table"%in%class(mtd_filtered)){
+    print("transforming mtd metadata in dataframe")
+    mtd_F<-data.frame(mtd_filtered)
+    print(head(mtd_filtered))
   }
   
-  design<-model.matrix(formule,data = batch_filtered)
+  design<-model.matrix(formule,data = mtd_filtered)
 
-  fit <- lmFit(methyl_df[,batch_filtered$sample], design)  
+  fit <- lmFit(methyl_df[,mtd_filtered$sample], design)  
   
   cont.matrix <- makeContrasts(contrasts = compas_df$compa,
                                levels=design)
@@ -864,24 +891,24 @@ CalcGeneScore<-function(res,cpg.regs_ref=NULL,pvalSig=0.001,sumToGene=FALSE,test
 #=> gene score cutoff = Accept Gene in EAF if appeared < x%  => genesF and genesM spe
 #make a permutFunction
 
-prepBatchDf<-function(batch,varNumToModel,varFacToModel){
+prepmtdDf<-function(mtd,varNumToModel,varFacToModel){
   
   varToModel<-c(varNumToModel,varFacToModel)
   
-  sample_F<-batch$sample[!(apply(is.na(batch[,..varToModel]),1,any))]
+  sample_F<-mtd$sample[!(apply(is.na(mtd[,..varToModel]),1,any))]
   
   print(paste(length(sample_F),"after filtration for NA "))
   
-  batch<-batch[sample%in%sample_F,c("sample",..varToModel),]
+  mtd<-mtd[sample%in%sample_F,c("sample",..varToModel),]
   
-  batch[,(varNumToModel):=lapply(.SD,as.numeric),.SDcols=varNumToModel]
-  batch[,(varFacToModel):=lapply(.SD,as.factor),.SDcols=varFacToModel]
+  mtd[,(varNumToModel):=lapply(.SD,as.numeric),.SDcols=varNumToModel]
+  mtd[,(varFacToModel):=lapply(.SD,as.factor),.SDcols=varFacToModel]
   
-  return(batch)
+  return(mtd)
 }
-permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,batch,var_to_permut,n_perm=1000,seed=1234,
-                          varNumToModel=c("Mat.Age"),varFacToModel=c("Group_Sex",'batch',"latino","Group_Complexity_Fac"),
-                          formule= ~0 + Group_Sex  + batch  + latino + Mat.Age + Group_Complexity_Fac,
+permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,mtd,var_to_permut,n_perm=1000,seed=1234,
+                          varNumToModel=c("Mat.Age"),varFacToModel=c("Group_Sex",'mtd',"latino","Group_Complexity_Fac"),
+                          formule= ~0 + Group_Sex  + mtd  + latino + Mat.Age + Group_Complexity_Fac,
                           verbose=FALSE
 ){
   library(data.table)
@@ -890,7 +917,7 @@ permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,batch,var_to_perm
   if(!is.list(res_to_permut)){
     print("need results in a  list named by comparison")
   }
-  batch<-prepBatchDf(batch,varNumToModel,varFacToModel)
+  mtd<-prepmtdDf(mtd,varNumToModel,varFacToModel)
   
   compas_df<-data.frame(compa=unlist(lapply(strsplit(names(res_to_permut),"-"),function(x)paste(paste0(var_to_permut,x),collapse = "-"))),
                         abbrev_compa=names(res_to_permut))
@@ -900,7 +927,7 @@ permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,batch,var_to_perm
   res_all<-data.table(gene=sort(unique(res_to_permut[[1]]$gene)))
   
   
-  batch_sim<-copy(batch)
+  mtd_sim<-copy(mtd)
   print(paste("set seed to",seed))
   set.seed(seed)
   
@@ -908,9 +935,9 @@ permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,batch,var_to_perm
   for(i in 1:n_perm){
     print(paste(i,"/",n_perm))
     
-    batch_sim[,Group_Sex:=sample(Group_Sex)]
+    mtd_sim[,Group_Sex:=sample(Group_Sex)]
     res_list<-RunMethAnalysis(methyl_df = methyl_df,
-                              batch_F = batch_sim,
+                              mtd_F = mtd_sim,
                               formule = formule,
                               compas_df =compas_df,
                               cpg.regs_ref = cpg.regs_ref,

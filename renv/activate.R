@@ -70,7 +70,7 @@ local({
     repos <- getOption("repos")
   
     # ensure @CRAN@ entries are resolved
-    repos[repos == "@CRAN@"] <- "https://cloud.r-project.org"
+    repos[repos == "@CRAN@"] <- "https//cloud.r-project.org"
   
     # add in renv.bootstrap.repos if set
     default <- c(CRAN = "https://cloud.r-project.org")
