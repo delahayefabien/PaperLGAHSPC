@@ -10,6 +10,7 @@ git config --global user.name "Alexandre Pelletier"
 ``` r
 renv::hydrate()
 renv::install(c("YuLab-SMU/clusterProfiler"))
+renv::install("missMDA")
 renv::snapshot() #git commit
 ```
 

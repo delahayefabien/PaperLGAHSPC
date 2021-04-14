@@ -217,7 +217,7 @@ CorrelCovarPCs<-function(pca,mtd,vars_num=NULL,vars_fac=NULL,rngPCs=1:30,res="pv
 }
 
 
-plotPvalsHeatMap(pvals_mat,p.thr=0.1,col_breaks<-c(40,20,10:1, 0.5,0.1),cluster_rows = F,cluster_cols = F){
+plotPvalsHeatMap<-function(pvals_mat,p.thr=0.1,col_breaks=c(40,20,10:1, 0.5,0.1),cluster_rows = F,cluster_cols = F){
     require(pheatmap)
     
     pvals_mat[which(pvals_mat>p.thr)]<-1 #### put them to 1 if less than 0.1
@@ -225,17 +225,23 @@ plotPvalsHeatMap(pvals_mat,p.thr=0.1,col_breaks<-c(40,20,10:1, 0.5,0.1),cluster_
   
     vars<-rownames(pvals_mat)
   
-    pheatmap(resToPlot,cluster_rows = cluster_rows,cluster_cols = cluster_cols,
+    pheatmap(pvals_mat,cluster_rows = cluster_rows,cluster_cols = cluster_cols,
              display_numbers = T,
              color = colorRampPalette(c("white", "red"))(13), breaks = col_breaks)
   
   }
 
 
-correl<-function(x,y,ret="all",verbose=T){
+correl<-function(x,y=NULL,ret="pval",verbose=F){
+  if(is.null(y)){
+    y=unlist(x[,2],use.names = F)
+    x=unlist(x[,1],use.names = F)
+    }
+  
   if(is.numeric(x)){
+    
     if(verbose){
-      print("linear modeling ")
+      message("linear modeling ")
     }
     
     res<-lm(x~y)
@@ -256,9 +262,11 @@ correl<-function(x,y,ret="all",verbose=T){
     
   }else if(all(sapply(list(x,y),is.factor))){
     if(verbose){
-      print("Chi-squared independance test")
+      message("Chi-squared independance test")
     }
     
+    x<-factor(x,levels = unique(x))
+    y<-factor(y,levels = unique(y))
     tableF<-table(x,y)
     test<-chisq.test(tableF)
     if(verbose){
@@ -588,7 +596,7 @@ plotMeth<-function(cpgs,
                    methyl_df=NULL,
                    mtd=NULL,
                    plot="boxplot",
-                   group="locisID",
+                   group="cpg_id",
                    wrap=FALSE){
   library(ggplot2)
   library(data.table)
@@ -604,32 +612,32 @@ plotMeth<-function(cpgs,
   
   if(is.data.table(cpgs)){
     dt<-copy(cpgs)
-    cpgs<-dt$locisID
+    cpgs<-dt$cpg_id
   }else{
     dt<-NA
   }
   
   if(is.numeric(cpgs)){
 
-        cpgs_data<-methyl_df[locisID%in%cpgs]
-        #need transformer methyl_df en df with sample,locisID,meth,group..
-        samples<-colnames(cpgs_data)[colnames(cpgs_data)!="locisID"]
+        cpgs_data<-methyl_df[cpg_id%in%cpgs]
+        #need transformer methyl_df en df with sample,cpg_id,meth,group..
+        samples<-colnames(cpgs_data)[colnames(cpgs_data)!="cpg_id"]
         
         cpgs_data2<-data.table(expand.grid(sample=samples,
-                               locisID=cpgs_data$locisID))
+                               cpg_id=cpgs_data$cpg_id))
         cpgs_score<-Reduce(rbind,lapply(samples, function(sampleID){
           
-          return(cpgs_data[,unmeth:=.SD,.SDcols=sampleID][,sample:=sampleID][,.(locisID,sample,unmeth)])
+          return(cpgs_data[,unmeth:=.SD,.SDcols=sampleID][,sample:=sampleID][,.(cpg_id,sample,unmeth)])
         }))
         
-        cpgs_data2<-merge(cpgs_data2,cpgs_score,by=c("locisID","sample"))
+        cpgs_data2<-merge(cpgs_data2,cpgs_score,by=c("cpg_id","sample"))
         
         
         cpgs_data2<-cpgs_data2[!is.na(unmeth)]
         cpgs_data_mtd<-merge(cpgs_data2,mtd[match(cpgs_data2$sample,sample)][!is.na(sample)],by="sample",allow.cartesian=TRUE)
         
         if(any(!is.na(dt))){
-          cpgs_data_mtd<-merge(cpgs_data_mtd,dt,by="locisID")
+          cpgs_data_mtd<-merge(cpgs_data_mtd,dt,by="cpg_id")
           
         }
         
@@ -681,7 +689,7 @@ RunMethAnalysis<-function(methyl_df,mtd_filtered,formule,cpg.regs_ref,compas_df,
   
   if("data.table"%in%class(methyl_df)){
     print("transforming methyl_data in dataframe")
-    methyl_df<-data.frame(methyl_df,row.names = methyl_df$locisID)
+    methyl_df<-data.frame(methyl_df,row.names = methyl_df$cpg_id)
     print(head(methyl_df))
   }
   
@@ -708,23 +716,23 @@ RunMethAnalysis<-function(methyl_df,mtd_filtered,formule,cpg.regs_ref,compas_df,
     res_list<-lapply(compas_df$abbrev_compa,function(compa){
       res<-topTable(fit2,coef=compa,n =Inf)
       
-      res<-CalcGeneScore(res,cpg.regs_ref,sumToGene=sumToGene,verbose = verbose)
-      return(res[order(-GeneScore)])
+      res<-Calcgene_score(res,cpg.regs_ref,sumToGene=sumToGene,verbose = verbose)
+      return(res[order(-gene_score)])
     })
     names(res_list)<-compas_df$abbrev_compa
     return(res_list)
     
   }else{
     res<-topTable(fit2,coef=compas_df$abbrev_compa,n =Inf)
-    res<-CalcGeneScore(res,cpg.regs_ref,sumToGene=sumToGene,verbose=verbose)
-    return(res[order(-GeneScore)])
+    res<-Calcgene_score(res,cpg.regs_ref,sumToGene=sumToGene,verbose=verbose)
+    return(res[order(-gene_score)])
   }
   
   
   
 }
 
-#CALCUL GENESCORE
+#CALCUL gene_score
 
 CalcCpGWeights<-function(cpgs_genes){
   
@@ -785,11 +793,11 @@ CalcCpGWeights<-function(cpgs_genes){
   cpgs_genes[in_wb_eQTR==TRUE,in_meta_eQTR:=FALSE]
   cpgs_genes[in_meta_eQTR==TRUE,in_wb_eQTR:=FALSE]
   
-  cpgs_genes[,inBoth_eQTR:=any(in_meta_eQTR==TRUE)&any(in_wb_eQTR==TRUE),by=c("locisID","gene")]
+  cpgs_genes[,inBoth_eQTR:=any(in_meta_eQTR==TRUE)&any(in_wb_eQTR==TRUE),by=c("cpg_id","gene")]
   
-  cpgs_genes[inBoth_eQTR==TRUE,LinksWeight:=1,by=c("locisID","gene")]
+  cpgs_genes[inBoth_eQTR==TRUE,LinksWeight:=1,by=c("cpg_id","gene")]
   
-  cpgs_genes[inBoth_eQTR==FALSE,LinksWeight:=max(LinkScore),by=c("locisID","gene")]
+  cpgs_genes[inBoth_eQTR==FALSE,LinksWeight:=max(LinkScore),by=c("cpg_id","gene")]
   
   cpgs_genes[inBoth_eQTR==TRUE,LinksWeight:=1]
   
@@ -810,23 +818,25 @@ CalcCpGScore<-function(res,cpg_genes=NULL,verbose=TRUE){
       res$logFC<-res$meth.change
       
     }
-    if(!("locisID"%in%colnames(res))){
-      res$locisID<-rownames(res)
+    if(!("cpg_id"%in%colnames(res))){
+      res$cpg_id<-rownames(res)
     }
-    res<-data.table(locisID=as.numeric(res$locisID),
+    res<-data.table(cpg_id=as.numeric(res$cpg_id),
                     meth.change=res$logFC,
-                    pval=res$P.Value)[order(locisID)]
+                    pval=res$P.Value)[order(cpg_id)]
     
-    res<-merge(res,cpg_genes,by="locisID")
+    res<-merge(res,cpg_genes,by="cpg_id")
+    
     
   }else if(is.null(cpg_genes)&
            !all(c("LinksWeight","RegWeight")%in%colnames(res))){
     library(data.table)
     cpg_genes<-fread("ref/2020-06-29_All_CpG-Gene_links.csv")
-    res<-merge(res,cpg_genes,all=T,by="locisID")
+    res<-merge(res,cpg_genes,all=T,by="cpg_id")
   }
   
   if(all(c("LinksWeight","RegWeight")%in%colnames(res))){
+    res[,cpg_score:=(-log10(pval)/4*meth.change)*RegWeight*LinksWeight]
   }else{
     print("need calculate linksWeight and RegWeight of CpGs before.")
   }
@@ -836,58 +846,58 @@ CalcCpGScore<-function(res,cpg_genes=NULL,verbose=TRUE){
   
 }
 
-CalcGeneScore<-function(res,cpg.regs_ref=NULL,pvalSig=0.001,sumToGene=FALSE,test=FALSE,recalcul_CpGScore=FALSE,verbose=TRUE){
+CalcGeneScore<-function(res,cpg.regs_ref=NULL,pvalSig=0.001,sumToGene=FALSE,test=FALSE,recalcul_cpg_score=FALSE,verbose=TRUE){
   
-  if((!"CpGScore"%in%colnames(res))|recalcul_CpGScore==TRUE){
+  if((!"cpg_score"%in%colnames(res))|recalcul_cpg_score==TRUE){
     if(verbose){
-      print("calculating CpGScore...")
+      print("calculating cpg_score...")
     }
     
-    res<-CalcCpGScore(res,cpg.regs_ref,useChromatinFeature=useChromatinFeature,verbose = verbose)
+    res<-CalcCpGScore(res,cpg.regs_ref,verbose = verbose)
   }
   
   if(verbose){
-    print("calculating GeneScore...")
+    print("calculating gene_score...")
     print("1) add column number of CpG by Gene")
   }
   
   
-  res[,nCpG.Gene:=.N,by=.(gene)]
+  res[,n.cpg.gene:=.N,by=.(gene)]
   
-  res[,nCpGSig.Gene:=sum(pval<pvalSig),by=.(gene)]
+  res[,n.cpg.sig.gene:=sum(pval<pvalSig),by=.(gene)]
   if(verbose){
-    print("2) the nCpGWeight : (1/sum(1/(abs(CpGScore)+1)))^(1/4)")
+    print("2) the n.cpg_weight : (1/sum(1/(abs(cpg_score)+1)))^(1/4)")
   }
   
-  res[,nCpGWeight:=(1/sum(1/(abs(CpGScore)+1)))^(1/4),by="gene"]
+  res[,n.cpg_weight:=(1/sum(1/(abs(cpg_score)+1)))^(1/4),by="gene"]
   
   if(verbose){
-    print("3) the GeneScore : sum(CpGScore)*nCpGWeight")
+    print("3) the gene_score : sum(cpg_score)*n.cpg_weight")
   }
-  res[,GeneScore:=sum(CpGScore)*nCpGWeight,by="gene"]
+  res[,gene_score:=sum(cpg_score)*n.cpg_weight,by="gene"]
   
   if(test==TRUE){
     library(ggplot2)
     library(patchwork)
-    print("plot GeneScore ~ nCpG")
+    print("plot gene_score ~ nCpG")
     p1<-ggplot(unique(res,by="gene"))+
-      geom_boxplot(aes(x = as.factor(nCpG.Gene),y =nCpGWeight )) 
+      geom_boxplot(aes(x = as.factor(nCpG.Gene),y =n.cpg_weight )) 
     
     p2<-ggplot(unique(res,by="gene"))+
-      geom_boxplot(aes(x = as.factor(nCpG.Gene),y =GeneScore )) 
+      geom_boxplot(aes(x = as.factor(nCpG.Gene),y =gene_score )) 
     p_all<-p1+p2
     print(p_all)
   }
   
   if(sumToGene){
-    return(unique(res[order(-GeneScore,pval)],by="gene"))
+    return(unique(res[order(-gene_score,pval)],by="gene"))
   }else{
-    return(res[order(-GeneScore,pval)])
+    return(res[order(-gene_score,pval)])
   }
 }
 
-#deter genescore cutoff x / deter EpigenAffGene (EAG) : 
-# 1000 permuts of all samples CTRL / LGA => LIMMA => pval and FC => df GeneScore => save pct genescore permuts >= geneScore obs
+#deter gene_score cutoff x / deter EpigenAffGene (EAG) : 
+# 1000 permuts of all samples CTRL / LGA => LIMMA => pval and FC => df gene_score => save pct gene_score permuts >= gene_score obs
 #=> gene score cutoff = Accept Gene in EAF if appeared < x%  => genesF and genesM spe
 #make a permutFunction
 
@@ -906,7 +916,7 @@ prepmtdDf<-function(mtd,varNumToModel,varFacToModel){
   
   return(mtd)
 }
-permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,mtd,var_to_permut,n_perm=1000,seed=1234,
+permutgene_score<-function(res_to_permut,methyl_df,cpg.regs_ref,mtd,var_to_permut,n_perm=1000,seed=1234,
                           varNumToModel=c("Mat.Age"),varFacToModel=c("Group_Sex",'mtd',"latino","Group_Complexity_Fac"),
                           formule= ~0 + Group_Sex  + mtd  + latino + Mat.Age + Group_Complexity_Fac,
                           verbose=FALSE
@@ -947,9 +957,9 @@ permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,mtd,var_to_permut
     
     res_list<-lapply(names(res_list),function(compa){
       res<-res_list[[compa]]
-      res<-res[order(gene)][,.(gene,GeneScore)]
+      res<-res[order(gene)][,.(gene,gene_score)]
       col<-paste0(str_sub(compa,str_length(compa)),i)
-      return(res[,(col):=as.integer(GeneScore)][,-"GeneScore"])
+      return(res[,(col):=as.integer(gene_score)][,-"gene_score"])
     })
     
     res_list<-Reduce(merge,res_list)
@@ -963,7 +973,7 @@ permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,mtd,var_to_permut
     compa<-names(res_to_permut)[i]
     cols<-paste0(str_sub(compa,str_length(compa)),1:n_perm)
     col<-paste0("pval",n_perm,"perm")
-    res<-res[order(gene)][,(col):=rowSums(..res_all[order(gene)][,.SD,.SD=cols]>GeneScore)/(..n_perm)]
+    res<-res[order(gene)][,(col):=rowSums(..res_all[order(gene)][,.SD,.SD=cols]>gene_score)/(..n_perm)]
     cols<-c("gene",col)
     return(merge(res_to_permut[[i]],res[,.SD,.SD=cols],by="gene"))
   })
