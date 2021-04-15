@@ -33,8 +33,10 @@ mtd[,(bool_vars):=lapply(.SD,as.logical),.SDcols=bool_vars]
 categorical_vars<-c(bool_vars,"group","sex","group_sex","ethnicity","lab","batch","date","DNA.extraction","sequencing","year")
 mtd[,(categorical_vars):=lapply(.SD,as.factor),.SDcols=categorical_vars]
 
+numerical_vars<-c("weight.g","weight_at_term.lbs","gest.age.wk","length.cm","mat.age","head_circumf.cm.","ponderal_index","seq.depth","library_complexity","group_complexity","group_complexity_fac","groupbatch_complexity","groupbatch_complexity_fac")
 
 fwrite(mtd,"datasets/cd34/metadata_140421.csv",sep=";")
+mtd<-fread("datasets/cd34/metadata_140421.csv",sep=";")
 meth<-fread(meth_file,
             select = c("id","chr","start",mtd$sample,"msp1c","confidenceScore"),
             col.names = c("cpg_id","chr","pos",mtd$sample,"msp1c","confidence_score"))
@@ -99,17 +101,18 @@ mtd<-mtd[,-c("sequencing","date")]
 meth_mat<-as.matrix(data.frame(meth,row.names = "cpg_id")[,mtd$sample])
 pca<-prcomp(t(meth_mat))
 
-pval_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:10,res = "pval",seuilP = 0.05) #batch, seq depth,group_complexity,group , ethnicity
+pval_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:10,res = "pval",seuilP = 1) #batch, seq depth,group_complexity,group , ethnicity
+
+r2_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:10,res = "r2",seuilP = 1) #batch, seq depth,group_complexity,group , ethnicity
 
 meth.influencing.vars<-rownames(pval_mat)[rowSums(pval_mat<0.01)>0]
-
+meth.influencing.vars<-c(meth.influencing.vars,"mat.age","latino","group")
 fwrite(data.table(pval_mat,keep.rownames = "covar"),fp(out,"res_correl_covar_pcs.csv"),sep=";")
 
 # correl between covars and group
 infl.vars.fac<-meth.influencing.vars[meth.influencing.vars%in%categorical_vars]
-infl.vars.num<-setdiff(meth.influencing.vars,infl.vars.fac)
+infl.vars.num<-meth.influencing.vars[meth.influencing.vars%in%numerical_vars]
 
-infl.vars.fac<-union(infl.vars.fac,"group")
 cor_nums<-sapply(infl.vars.num,function(var1){
   r2s<-sapply(infl.vars.num,function(var2){
     f<-as.formula(paste(var1,"~",var2))
@@ -118,7 +121,7 @@ cor_nums<-sapply(infl.vars.num,function(var1){
   return(r2s)
   })
 cor_nums<-data.matrix(cor_nums)
-pheatmap(cor_nums,display_numbers = T,cluster_rows = F,cluster_cols = F) #group_complexity fac and seq depth
+pheatmap(cor_nums,display_numbers = T,cluster_rows = F,cluster_cols = F) 
 
 pvals_num_fac<-sapply(infl.vars.num,function(var1){
   pvals<-sapply(infl.vars.fac,function(var2){
@@ -128,7 +131,7 @@ pvals_num_fac<-sapply(infl.vars.num,function(var1){
   return(pvals)
   })
 pvals_num_fac<-data.matrix(pvals_num_fac)
-plotPvalsHeatMap(pvals_num_fac) #group_complexity fac and seq depth
+plotPvalsHeatMap(pvals_num_fac) 
 
 pvals_fac<-sapply(infl.vars.fac,function(var1){
   pvals<-sapply(infl.vars.fac,function(var2)correl(mtd[,.SD,.SDcols=c(var1,var2)],verbose = T))
@@ -139,31 +142,35 @@ pvals_fac[is.na(pvals_fac)]<-1
 pheatmap(-log10(pvals_fac),display_numbers = T,cluster_rows = F,cluster_cols = F) #no correl
 table(mtd[,.(group,GDM)])
 
-# so include batch, ethnicity, GDM, group_complexity_fac,sequencing, and seq.depth in the model 
-vars_to_include<-c("batch","ethnicity","GDM","group_complexity_fac","seq.depth")
+# so include batch, latino,mat.age, group_complexity_fac, in the model 
+vars_to_include<-c("batch","latino","mat.age","group_complexity_fac","group","seq.depth")
 
 
 #DATA MODELING and DMC analysis with limma
-#Clinical na imputation
-library(FactoMineR)
-library(missMDA)
-sum(rowSums(sapply(mtd[,.SD,.SDcols=vars_to_include], function(x)is.na(x)))>0) #8/79 with na values
-mtd_cat_df<-data.frame(mtd[,.SD,.SDcols=c("sample",intersect(colnames(mtd),categorical_vars))],row.names = "sample")
-res.mca<-MCA(mtd_cat_df, quali.sup = which(!colnames(mtd_cat_df)%in%intersect(vars_to_include,categorical_vars)))
-res.impute <- imputeMCA(mtd_cat_df[,which(colnames(mtd_cat_df)%in%intersect(vars_to_include,categorical_vars))], ncp=2)
-mtd_imp<-data.table(res.impute$comp[,c("ethnicity","GDM")],keep.rownames = "sample")
-colnames(mtd_imp)[2:3]<-paste0(colnames(mtd_imp)[2:3],"_imp")
+# #Clinical na imputation
+# library(FactoMineR)
+# library(missMDA)
+# sum(rowSums(sapply(mtd[,.SD,.SDcols=vars_to_include], function(x)is.na(x)))>0) #9/79 with na values
+# mtd_cat_df<-data.frame(mtd[,.SD,.SDcols=c("sample",intersect(colnames(mtd),categorical_vars))],row.names = "sample")
+# res.mca<-MCA(mtd_cat_df, quali.sup = which(!colnames(mtd_cat_df)%in%intersect(vars_to_include,categorical_vars)))
+# res.impute <- imputeMCA(mtd_cat_df[,which(colnames(mtd_cat_df)%in%intersect(vars_to_include,categorical_vars))], ncp=2)
+# mtd_imp<-data.table(res.impute$comp[,c("latino","GDM")],keep.rownames = "sample")
+# colnames(mtd_imp)[2:3]<-paste0(colnames(mtd_imp)[2:3],"_imp")
+# 
+# mtd<-merge(mtd,mtd_imp,by="sample")
+# mtd[,.(latino,latino_imp,GDM,GDM_imp,mat.age)] #
 
-mtd<-merge(mtd,mtd_imp,by="sample")
-mtd[,.(ethnicity,ethnicity_imp,GDM,GDM_imp)]
 
-#Limma
-formule<- ~0 + group  + ethnicity_imp + GDM_imp + batch+ group_complexity_fac + seq.depth
-mtd[,group:=factor(group,levels = unique(mtd$group))]
+#LIMMA
+# rm samples without all necessary clinical infos
+mtd<-mtd[,to_keep:=rowSums(is.na(.SD))==0,.SDcols=vars_to_include][to_keep==T]
+formule<- ~0 + group_sex  + latino + batch+ group_complexity_fac +mat.age +seq.depth
+
+mtd[,group_sex:=factor(group_sex,levels = unique(mtd$group_sex))]
 design<-model.matrix(formule,data = data.frame(mtd,row.names = "sample"))
 fit <- lmFit(data.frame(meth,row.names = "cpg_id")[,mtd$sample], design)
 
-cont.matrix <- makeContrasts(C.L = "groupCTRL-groupLGA",
+cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
                              levels=design)
 
 
@@ -171,14 +178,16 @@ fit2  <- contrasts.fit(fit, cont.matrix)
 fit2  <- eBayes(fit2)
 
 res<-data.table(topTable(fit2,coef = "C.L",n = Inf),keep.rownames = "cpg_id")
-
+res[adj.P.Val<=0.05] #16 cpgs
 fwrite(res,fp(out,"res_limma.tsv.gz"),sep="\t")
 
 p<-ggplot(res)+
-  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<0.001&abs(logFC)>20))+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<0.001&abs(logFC)>30))+
   scale_color_manual(values = c("grey","red"))
-ggsave(fp(out,"volcano_plot_cohort2.png"),plot=p,height=5,width=7)
+ggsave(fp(out,"volcano_plot.png"),plot=p,height=5,width=7)
 
+
+res[P.Value<0.001&abs(logFC)>30] #4149 cpgs
 
 
 
