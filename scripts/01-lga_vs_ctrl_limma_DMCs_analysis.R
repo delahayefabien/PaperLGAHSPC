@@ -27,6 +27,7 @@ mtd[,group:=ifelse(group=="L","LGA",ifelse(group=="I","IUGR","CTRL"))]
 mtd[,group_sex:=paste(group,sex,sep = "_")]
 mtd[,year:=str_extract(date,"20[0-9]+$")]
 mtd[ethnicity%in%c("Declined",""," "),ethnicity:=NA]
+mtd[,ethnicity:=factor(ethnicity,levels=unique(ethnicity))]
 bool_vars<-c("latino","preterm","GDM","drugs","etoh", "smoking")
 mtd[,(bool_vars):=lapply(.SD,as.logical),.SDcols=bool_vars]
 
@@ -36,6 +37,8 @@ mtd[,(categorical_vars):=lapply(.SD,as.factor),.SDcols=categorical_vars]
 numerical_vars<-c("weight.g","weight_at_term.lbs","gest.age.wk","length.cm","mat.age","head_circumf.cm.","ponderal_index","seq.depth","library_complexity","group_complexity","group_complexity_fac","groupbatch_complexity","groupbatch_complexity_fac")
 
 fwrite(mtd,"datasets/cd34/metadata_140421.csv",sep=";")
+
+
 mtd<-fread("datasets/cd34/metadata_140421.csv",sep=";")
 meth<-fread(meth_file,
             select = c("id","chr","start",mtd$sample,"msp1c","confidenceScore"),
@@ -97,10 +100,28 @@ table(mtd[,.(group,sex)])
 lapply(mtd[,.SD,.SDcols=categorical_vars],function(x)sum(table(x)==1)) #exclude sequencing and date
 
 mtd<-mtd[,-c("sequencing","date")]
-
+library(ggrepel)
 meth_mat<-as.matrix(data.frame(meth,row.names = "cpg_id")[,mtd$sample])
 pca<-prcomp(t(meth_mat))
+pc_mtd<-merge(data.table(pca$x,keep.rownames = "sample"),mtd)
+ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC2,col=group))
+ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC2,col=ponderal_index))
+ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC3,col=GDM))
 
+ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC6,col=mat.age))
+
+ggplot(pc_mtd)+geom_point(aes(x=PC2,y=PC9,col=latino))
+
+mtd[is.na(mat.age)]
+mtd[is.na(latino)]
+
+ggplot(pc_mtd,aes(x=PC1,y=PC2,col=GDM))+geom_point()+ggrepel::geom_label_repel(aes(label=sample))
+mtd[sample%in%c("CBP186","CBP253","CBP252","CBP205")]
+
+ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC2,col=library_complexity))
+
+
+pc_mtd[is.na(ponderal_index)]
 pval_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:10,res = "pval",seuilP = 1) #batch, seq depth,group_complexity,group , ethnicity
 
 r2_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:10,res = "r2",seuilP = 1) #batch, seq depth,group_complexity,group , ethnicity
@@ -142,8 +163,8 @@ pvals_fac[is.na(pvals_fac)]<-1
 pheatmap(-log10(pvals_fac),display_numbers = T,cluster_rows = F,cluster_cols = F) #no correl
 table(mtd[,.(group,GDM)])
 
-# so include batch, latino,mat.age, group_complexity_fac, in the model 
-vars_to_include<-c("batch","latino","mat.age","group_complexity_fac","group","seq.depth")
+# so include batch,mat.age, group_complexity_fac, in the model 
+vars_to_include<-c("batch","mat.age","group_complexity_fac","group")
 
 
 #DATA MODELING and DMC analysis with limma
@@ -163,12 +184,12 @@ vars_to_include<-c("batch","latino","mat.age","group_complexity_fac","group","se
 
 #LIMMA
 # rm samples without all necessary clinical infos
-mtd<-mtd[,to_keep:=rowSums(is.na(.SD))==0,.SDcols=vars_to_include][to_keep==T]
-formule<- ~0 + group_sex  + latino + batch+ group_complexity_fac +mat.age +seq.depth
+mtd_f<-mtd[,to_keep:=rowSums(is.na(.SD))==0,.SDcols=vars_to_include][to_keep==T]
+formule<- ~0 + group_sex   + batch+ group_complexity_fac +mat.age 
 
-mtd[,group_sex:=factor(group_sex,levels = unique(mtd$group_sex))]
-design<-model.matrix(formule,data = data.frame(mtd,row.names = "sample"))
-fit <- lmFit(data.frame(meth,row.names = "cpg_id")[,mtd$sample], design)
+mtd_f[,group_sex:=factor(group_sex,levels = unique(mtd_f$group_sex))]
+design<-model.matrix(formule,data = data.frame(mtd_f,row.names = "sample"))
+fit <- lmFit(data.frame(meth,row.names = "cpg_id")[,mtd_f$sample], design)
 
 cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
                              levels=design)
@@ -178,7 +199,7 @@ fit2  <- contrasts.fit(fit, cont.matrix)
 fit2  <- eBayes(fit2)
 
 res<-data.table(topTable(fit2,coef = "C.L",n = Inf),keep.rownames = "cpg_id")
-res[adj.P.Val<=0.05] #16 cpgs
+res[adj.P.Val<=0.05] #2 cpgs
 fwrite(res,fp(out,"res_limma.tsv.gz"),sep="\t")
 
 p<-ggplot(res)+
@@ -186,8 +207,7 @@ p<-ggplot(res)+
   scale_color_manual(values = c("grey","red"))
 ggsave(fp(out,"volcano_plot.png"),plot=p,height=5,width=7)
 
-
-res[P.Value<0.001&abs(logFC)>30] #4149 cpgs
+res[P.Value<0.001&abs(logFC)>30] #1508 cpgs
 
 
 
