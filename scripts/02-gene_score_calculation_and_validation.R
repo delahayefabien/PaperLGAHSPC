@@ -50,6 +50,10 @@ fwrite(res_anno,fp(out,"res_gene_score.tsv.gz"),sep="\t")
 resg<-unique(res_anno[order(gene,region_type,pval)],by=c("gene"))
 
 ggplot(resg)+
+      geom_point(aes(x = gene_score_prom,y =gene_score_enh )) #ok
+resg[gene_score_prom>200&gene_score_enh>200]
+
+ggplot(resg)+
       geom_boxplot(aes(x = as.factor(n.cpg.gene),y =gene_score )) #ok
 
 ggplot(resg)+
@@ -80,18 +84,19 @@ res_de_cl[is.na(padj),padj:=1]
 resg_de<-merge(resg,res_de_cl,by=c("gene"))
 resg_de[padj.y<0.1]
 p1<-ggplot(resg_de)+geom_boxplot(aes(x=padj.y<0.1,y=gene_score_prom),outlier.shape = NA)
-p1.5<-ggplot(resg_de)+geom_boxplot(aes(x=padj.y<0.1,y=gene_score_enh))+scale_y_continuous(limits = c(0,100))
+p1.5<-ggplot(resg_de)+geom_boxplot(aes(x=padj.y<0.1,y=gene_score_enh))
 p2<-ggplot(unique(resg_de,by="gene"))+geom_boxplot(aes(x=padj.y<0.1,y=gene_score_add))
 
 p3<-ggplot(unique(resg_de,by="gene"))+geom_boxplot(aes(x=padj.y<0.1,y=gene_score))
 
+
 p1+p1.5+p2+p3
 
 wilcox.test(resg_de[padj.y<=0.1]$gene_score_add,resg_de[padj.y>0.1]$gene_score_add)
-#p=0.00088
+#p=0.0003
 
 wilcox.test(resg_de[padj.y<=0.1]$gene_score,resg_de[padj.y>0.1]$gene_score)
-#p=0.006
+#p=0.001
 
  
 p4<-ggplot(unique(resg_de,by="gene"))+geom_boxplot(aes(x=padj.y<0.1,y=avg.meth.change))
@@ -112,3 +117,14 @@ p2+p4+p5+p6
 
 p10<-ggplot(unique(resg_de,by="gene"))+geom_boxplot(aes(x=padj.y<0.1,y=GeneScore))
 p2+p10
+
+res_cl<-fread("outputs/model14_without_iugr/2020-09-16_res_C.L_with_GeneScore_and_permut.csv")
+res_cl_merge<-merge(res_cl,res_de_cl[,.(gene,log2FoldChange,pvalue,padj)])
+p11<-ggplot(unique(res_cl_merge,by="gene"))+geom_boxplot(aes(x=padj<0.1,y=GeneScore))
+
+p2<-p2+coord_cartesian(ylim = c(0,400))
+p11<-p11+coord_cartesian(ylim = c(0,400))
+p2+p11
+
+wilcox.test(unique(res_cl_merge,by="gene")[padj<=0.1]$GeneScore,unique(res_cl_merge,by="gene")[padj>0.1]$GeneScore)
+#p=0.001

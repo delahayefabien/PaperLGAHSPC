@@ -122,9 +122,9 @@ ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC2,col=library_complexity))
 
 
 pc_mtd[is.na(ponderal_index)]
-pval_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:10,res = "pval",seuilP = 1) #batch, seq depth,group_complexity,group , ethnicity
+pval_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:30,res = "pval",seuilP = 0.1) #batch, seq depth,group_complexity,group , ethnicity
 
-r2_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:10,res = "r2",seuilP = 1) #batch, seq depth,group_complexity,group , ethnicity
+r2_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:30,res = "r2",seuilP = 0.1) #batch, seq depth,group_complexity,group , ethnicity
 
 meth.influencing.vars<-rownames(pval_mat)[rowSums(pval_mat<0.01)>0]
 meth.influencing.vars<-c(meth.influencing.vars,"mat.age","latino","group")
@@ -153,6 +153,7 @@ pvals_num_fac<-sapply(infl.vars.num,function(var1){
   })
 pvals_num_fac<-data.matrix(pvals_num_fac)
 plotPvalsHeatMap(pvals_num_fac) 
+summary(lm(mtd$seq.depth~mtd$group))
 
 pvals_fac<-sapply(infl.vars.fac,function(var1){
   pvals<-sapply(infl.vars.fac,function(var2)correl(mtd[,.SD,.SDcols=c(var1,var2)],verbose = T))
@@ -164,28 +165,14 @@ pheatmap(-log10(pvals_fac),display_numbers = T,cluster_rows = F,cluster_cols = F
 table(mtd[,.(group,GDM)])
 
 # so include batch,mat.age, group_complexity_fac, in the model 
-vars_to_include<-c("batch","mat.age","group_complexity_fac","group")
+vars_to_include<-c("batch","mat.age","group_complexity_fac","group","seq.depth","latino","GDM")
 
 
 #DATA MODELING and DMC analysis with limma
-# #Clinical na imputation
-# library(FactoMineR)
-# library(missMDA)
-# sum(rowSums(sapply(mtd[,.SD,.SDcols=vars_to_include], function(x)is.na(x)))>0) #9/79 with na values
-# mtd_cat_df<-data.frame(mtd[,.SD,.SDcols=c("sample",intersect(colnames(mtd),categorical_vars))],row.names = "sample")
-# res.mca<-MCA(mtd_cat_df, quali.sup = which(!colnames(mtd_cat_df)%in%intersect(vars_to_include,categorical_vars)))
-# res.impute <- imputeMCA(mtd_cat_df[,which(colnames(mtd_cat_df)%in%intersect(vars_to_include,categorical_vars))], ncp=2)
-# mtd_imp<-data.table(res.impute$comp[,c("latino","GDM")],keep.rownames = "sample")
-# colnames(mtd_imp)[2:3]<-paste0(colnames(mtd_imp)[2:3],"_imp")
-# 
-# mtd<-merge(mtd,mtd_imp,by="sample")
-# mtd[,.(latino,latino_imp,GDM,GDM_imp,mat.age)] #
-
-
-#LIMMA
 # rm samples without all necessary clinical infos
 mtd_f<-mtd[,to_keep:=rowSums(is.na(.SD))==0,.SDcols=vars_to_include][to_keep==T]
-formule<- ~0 + group_sex   + batch+ group_complexity_fac +mat.age 
+
+formule<- ~0 + group_sex   + batch+ group_complexity_fac +mat.age + seq.depth+GDM
 
 mtd_f[,group_sex:=factor(group_sex,levels = unique(mtd_f$group_sex))]
 design<-model.matrix(formule,data = data.frame(mtd_f,row.names = "sample"))
@@ -199,7 +186,8 @@ fit2  <- contrasts.fit(fit, cont.matrix)
 fit2  <- eBayes(fit2)
 
 res<-data.table(topTable(fit2,coef = "C.L",n = Inf),keep.rownames = "cpg_id")
-res[adj.P.Val<=0.05] #2 cpgs
+res[adj.P.Val<=0.05] #14 cpgs
+res[P.Value<0.001&abs(logFC)>30] #3875 cpgs
 fwrite(res,fp(out,"res_limma.tsv.gz"),sep="\t")
 
 p<-ggplot(res)+
@@ -207,7 +195,7 @@ p<-ggplot(res)+
   scale_color_manual(values = c("grey","red"))
 ggsave(fp(out,"volcano_plot.png"),plot=p,height=5,width=7)
 
-res[P.Value<0.001&abs(logFC)>30] #1508 cpgs
+
 
 
 
