@@ -36,10 +36,7 @@ mtd[,(categorical_vars):=lapply(.SD,as.factor),.SDcols=categorical_vars]
 
 numerical_vars<-c("weight.g","weight_at_term.lbs","gest.age.wk","length.cm","mat.age","head_circumf.cm.","ponderal_index","seq.depth","library_complexity","group_complexity","group_complexity_fac","groupbatch_complexity","groupbatch_complexity_fac")
 
-fwrite(mtd,"datasets/cd34/metadata_140421.csv",sep=";")
 
-
-mtd<-fread("datasets/cd34/metadata_140421.csv",sep=";")
 meth<-fread(meth_file,
             select = c("id","chr","start",mtd$sample,"msp1c","confidenceScore"),
             col.names = c("cpg_id","chr","pos",mtd$sample,"msp1c","confidence_score"))
@@ -83,6 +80,8 @@ meth #754931 CpGs after filtering
 
 #FOCUS ON CTRL LGA
 mtd<-mtd[group%in%c("CTRL","LGA")]
+fwrite(mtd,"datasets/cd34/metadata_cl_190421.csv",sep=";")
+
 meth<-meth[,.SD,.SDcols=c("cpg_id",mtd$sample)]
 
 all(mtd$sample%in%colnames(meth))
@@ -103,10 +102,14 @@ mtd<-mtd[,-c("sequencing","date")]
 library(ggrepel)
 meth_mat<-as.matrix(data.frame(meth,row.names = "cpg_id")[,mtd$sample])
 pca<-prcomp(t(meth_mat))
-pc_mtd<-merge(data.table(pca$x,keep.rownames = "sample"),mtd)
+pc_mtd<-merge(mtd,data.table(pca$x,keep.rownames = "sample"))
+
+fwrite(pc_mtd,"datasets/cd34/metadata_pcs_cl_190421.csv",sep=";")
+
 ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC2,col=group))
 ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC2,col=ponderal_index))
 ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC3,col=GDM))
+#PC2, unexplained variation so include in the model
 
 ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC6,col=mat.age))
 
@@ -164,15 +167,30 @@ pvals_fac[is.na(pvals_fac)]<-1
 pheatmap(-log10(pvals_fac),display_numbers = T,cluster_rows = F,cluster_cols = F) #no correl
 table(mtd[,.(group,GDM)])
 
-# so include batch,mat.age, group_complexity_fac, in the model 
-vars_to_include<-c("batch","mat.age","group_complexity_fac","group","seq.depth","latino","GDM")
+#all this covars necessary to explain PC1?
+summary(lm(PC1~group_complexity_fac+group+mat.age+latino,data = pc_mtd)) #seq.depth and mat age not sig in PC1
+summary(lm(PC1~group_complexity_fac+group+mat.age+latino+seq.depth,data = pc_mtd)) #seq.depth to rm
+summary(lm(PC1~group_complexity_fac+group+latino,data = pc_mtd)) #mat.age does not help to explain PC1 but explain well PC6 and PC26
+ggplot(pc_mtd)+geom_point(aes(x=PC6,y=PC26,col=mat.age))
+#and corralted with pct0
+pc_mtd[,pct_zero:=colSums(meth_mat[,pc_mtd$sample]==0)/nrow(meth_mat)]
+ggplot(pc_mtd)+geom_point(aes(x=mat.age,y=pct_zero,col=mat.age))
+
+
+#include group_sex in the model insteag of group ?
+summary(lm(PC1~group_complexity_fac+group_sex+latino,data = pc_mtd)) #can see that effect ++ in lga F than Lga M, and CtrlM not sig
+
+
+
+# so include batch,mat.age, group_complexity_fac,group_sex and PC2 in the model 
+vars_to_include<-c("batch","mat.age","group_complexity_fac","group","latino","PC2")
 
 
 #DATA MODELING and DMC analysis with limma
 # rm samples without all necessary clinical infos
-mtd_f<-mtd[,to_keep:=rowSums(is.na(.SD))==0,.SDcols=vars_to_include][to_keep==T]
+mtd_f<-pc_mtd[,to_keep:=rowSums(is.na(.SD))==0,.SDcols=vars_to_include][to_keep==T]
 
-formule<- ~0 + group_sex   + batch+ group_complexity_fac +mat.age + seq.depth+GDM
+formule<- ~0 + group_sex   + batch+ group_complexity_fac +mat.age  + latino + PC2
 
 mtd_f[,group_sex:=factor(group_sex,levels = unique(mtd_f$group_sex))]
 design<-model.matrix(formule,data = data.frame(mtd_f,row.names = "sample"))
@@ -186,8 +204,8 @@ fit2  <- contrasts.fit(fit, cont.matrix)
 fit2  <- eBayes(fit2)
 
 res<-data.table(topTable(fit2,coef = "C.L",n = Inf),keep.rownames = "cpg_id")
-res[adj.P.Val<=0.05] #14 cpgs
-res[P.Value<0.001&abs(logFC)>30] #3875 cpgs
+res[adj.P.Val<=0.05] #43 cpgs
+res[P.Value<0.001&abs(logFC)>30] #4774 cpgs
 fwrite(res,fp(out,"res_limma.tsv.gz"),sep="\t")
 
 p<-ggplot(res)+
