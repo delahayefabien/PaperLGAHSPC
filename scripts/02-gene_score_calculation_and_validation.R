@@ -41,9 +41,10 @@ ggplot(unique(res_anno,by="gene"))+geom_boxplot(aes(x = as.factor(n.cpg.gene),y 
 
 res_anno[,region_type:=ifelse(abs(tss_dist)<=2000,"promoter","other"),by="gene"]
 res_anno[,n_cpg_weight_region:=(1/sum(1/(abs(cpg_score)+1)))^(1/4),by=c('region_type',"gene")]
-res_anno[,gene_score_region:=sum(cpg_score)*n_cpg_weight_region,by=c("gene","region_type")]
+res_anno[region_type=="promoter",gene_score_region:=sum(cpg_score)*n_cpg_weight_region,by=c("gene")]
+res_anno[region_type=="other",gene_score_region:=sum(abs(cpg_score))*n_cpg_weight_region,by=c("gene")]
 
-res_anno[,gene_score_add:=sum(unique(gene_score_region),na.rm = T),by="gene"]
+res_anno[,gene_score_add:=sum(unique(abs(gene_score_region)),na.rm = T),by="gene"]
 res_anno[is.na(gene_score_add)] 
 res_anno<-res_anno[!is.na(gene_score_add)] #rm 54 genes with no tss dist so can not calculate genescore
 ggplot(unique(res_anno,by="gene"))+geom_boxplot(aes(x = as.factor(n.cpg.gene),y =gene_score_add )) #ok
@@ -74,7 +75,7 @@ p3<-ggplot(resg_de)+geom_boxplot(aes(x=padj.y<0.1,y=gene_score))
 p2+p3
 
 wilcox.test(resg_de[padj.y<=0.1]$gene_score_add,resg_de[padj.y>0.1]$gene_score_add)
-#p=0.0012
+#p=0.0007024
 
 wilcox.test(resg_de[padj.y<=0.1]$gene_score,resg_de[padj.y>0.1]$gene_score)
 #p=0.0015
@@ -109,4 +110,4 @@ p11<-p11+coord_cartesian(ylim = c(0,200))
 p2+p11
 
 wilcox.test(unique(res_cl_merge,by="gene")[padj<=0.1]$GeneScore,unique(res_cl_merge,by="gene")[padj>0.1]$GeneScore)
-#p=0.0012
+#p=0.001231

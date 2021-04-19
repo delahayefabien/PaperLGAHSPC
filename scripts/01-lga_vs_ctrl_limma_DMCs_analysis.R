@@ -12,7 +12,7 @@ mtd_file<-here("datasets/cd34/cleaned_batch_CD34_library_date_220620.csv")
 #Loading
 
 mtd<-fread(mtd_file,
-            select = c("sample","Group_name","Gender","Group_Sex",
+            select = c("sample","Group_name","Gender","group_sex",
                        "Weight..g.","Weight.at.term..lbs.","GA..wk.","Length..cm.","Mat.Age","HC..cm.","PI","SeqDepth",
                        "latino","Preterm","GDM","Drugs","Etoh", "Smoking",
                        "Race","Labor","batch","date","DNA.extraction","sequencing",
@@ -212,6 +212,91 @@ p<-ggplot(res)+
   geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<0.001&abs(logFC)>30))+
   scale_color_manual(values = c("grey","red"))
 ggsave(fp(out,"volcano_plot.png"),plot=p,height=5,width=7)
+
+#DMR
+#run 01B
+
+
+#Validation cohorts
+vars_to_include<-c("mat.age","group_complexity_fac","group","latino","PC2")
+
+mtd_f<-mtd[rowSums(is.na(mtd[,.SD,.SDcols=vars_to_include]))==0][batch==2]
+formule<- ~0 + group_sex  + group_complexity_fac +mat.age  + latino + PC2
+
+design<-model.matrix(formule,data = data.frame(mtd_f,row.names = "sample"))
+
+fit <- lmFit(data.frame(meth,row.names = "cpg_id")[,mtd_f$sample], design)
+
+
+cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
+                             F.M="(group_sexCTRL_F+group_sexLGA_F)-(group_sexCTRL_M+group_sexLGA_M)",
+                             CF.CM="group_sexCTRL_F-group_sexCTRL_M",
+                             CF.LF="group_sexCTRL_F-group_sexLGA_F",
+                             CF.LM="group_sexCTRL_F-group_sexLGA_M",
+                             CM.LM="group_sexCTRL_M-group_sexLGA_M",
+                             CM.LF="group_sexCTRL_M-group_sexLGA_F",
+                             LM.LF="group_sexLGA_M-group_sexLGA_F",
+                             levels=design)
+
+
+fit2  <- contrasts.fit(fit, cont.matrix)
+fit2  <- eBayes(fit2)
+
+res<-Reduce(rbind,lapply(colnames(cont.matrix), function(comp)data.table(topTable(fit2,coef = comp,n = Inf),keep.rownames = "cpg_id")[,compa:=comp]))
+fwrite(res,fp(out,"res_limma_cohort2.tsv.gz"),sep="\t")
+res<-fread(fp(out,"res_limma_cohort2.tsv.gz"),sep="\t")
+
+table(res[adj.P.Val<0.2&abs(logFC)>30][,hyper_meth:=logFC>0][,.(hyper_meth,compa)])
+p<-ggplot(res[compa%in%c("C.L","CF.LF",'CM.LM',"LM.LF")])+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=adj.P.Val<0.2&abs(logFC)>30))+
+  facet_wrap("compa")+
+  scale_color_manual(values = c("grey","red"))
+ggsave(fp(out,"volcano_plot_cohort2.png"),plot=p,height=5,width=7)
+
+#comp to cohort 1 
+mtdf<-mtd[rowSums(is.na(mtd[,.SD,.SDcols=var_to_model]))==0][batch==1]
+formule<- ~0 + group_sex  + latino + Mat.Age + Group_Complexity_Fac 
+
+design<-model.matrix(formule,data = data.frame(mtdf,row.names = "sample"))
+fit <- lmFit(data.frame(meth,row.names = "locisID")[,mtdf$sample], design)
+
+cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
+                             F.M="(group_sexCTRL_F+group_sexLGA_F)-(group_sexCTRL_M+group_sexLGA_M)",
+                             CF.CM="group_sexCTRL_F-group_sexCTRL_M",
+                             CF.LF="group_sexCTRL_F-group_sexLGA_F",
+                             CF.LM="group_sexCTRL_F-group_sexLGA_M",
+                             CM.LM="group_sexCTRL_M-group_sexLGA_M",
+                             CM.LF="group_sexCTRL_M-group_sexLGA_F",
+                             LM.LF="group_sexLGA_M-group_sexLGA_F",
+                             levels=design)
+
+
+fit2  <- contrasts.fit(fit, cont.matrix)
+fit2  <- eBayes(fit2)
+
+#merge res cohort 1 and 2
+res<-rbind(res[,cohort:=2],
+           Reduce(rbind,lapply(colnames(cont.matrix),
+                               function(comp)data.table(topTable(fit2,coef = comp,n = Inf),
+                                                        keep.rownames = "cpg_id")[,compa:=comp]))[,cohort:=1])
+fwrite(res,fp(out,"res_limma_cohorts.tsv.gz"),sep="\t")
+#cl
+ggplot(res[compa%in%c("C.L")])+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-4&abs(logFC)>30),size=0.1)+
+  facet_wrap("cohort")+
+  scale_color_manual(values = c("grey","red"))
+
+#cflf
+ggplot(res[compa%in%c("CF.LF")])+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-4&abs(logFC)>30),size=0.1)+
+  facet_wrap("cohort")+
+  scale_color_manual(values = c("grey","red"))
+
+#cmlm
+ggplot(res[compa%in%c("CM.LM")])+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-4&abs(logFC)>30),size=0.1)+
+  facet_wrap("cohort")+
+  scale_color_manual(values = c("grey","red"))
 
 
 

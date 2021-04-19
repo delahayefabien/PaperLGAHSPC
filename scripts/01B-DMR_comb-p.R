@@ -4,11 +4,19 @@ library(TxDb.Hsapiens.UCSC.hg19.knownGene)
 library("org.Hs.eg.db")
 source("scripts/utils/new_utils.R")
 
-out<-"outputs/02-gene_score_calculation_and_validation/dmr/"
+out<-"outputs/01B-DMR_comb-p/"
 dir.create(out)
-fwrite(res[,start:=pos][,end:=pos+1][order(chr,start)][!is.na(start)][,.(chr,start,end,pval)],fp(out,"res_cpgs.bed"),sep="\t")
 
-system("tools/comb-p/combined-pvalues/cpv/pipeline.py -p outputs/02-gene_score_calculation_and_validation/ctrl_lga --region-filter-p 0.1 --anno hg19 --seed 0.01 --dist 1000 outputs/02-gene_score_calculation_and_validation/res_cpgs.bed > outputs/02-gene_score_calculation_and_validation/ctrl_vs_lga_pvals.dmr.bed")
+res<-fread("outputs/01-lga_vs_ctrl_limma_DMCs_analysis/res_limma.tsv.gz",sep="\t")
+meth<-fread("datasets/cd34/CD34_angle_119_noEmptyLocis_withConfScore_withoutChrXY.txt",
+            select = c("id","chr","start"),
+            col.names = c("cpg_id","chr","pos"))
+
+res<-merge(res,meth[,.(cpg_id,chr,pos)],all.x = T)
+fwrite(res[,start:=pos][,end:=pos+1][order(chr,start)][!is.na(start)][,.(chr,start,end,P.Value)],fp(out,"res_cpgs.bed"),sep="\t")
+
+
+system("python tools/comb-p/combined-pvalues/cpv/pipeline.py -p outputs/01B-DMR_comb-p/ctrl_lga --region-filter-p 0.1 --anno hg19 --seed 0.01 --dist 1000 outputs/01B-DMR_comb-p")
 #
 res_dmr<-fread("outputs/02-gene_score_calculation_and_validation/ctrl_lga.regions-p.bed.gz")
 res_dmr<-res_dmr[,chr:=`#chrom`][,-1][,.(chr,start,end,min_p,n_probes,z_p,z_sidak_p)]
