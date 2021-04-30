@@ -12,7 +12,7 @@ mtd_file<-here("datasets/cd34/cleaned_batch_CD34_library_date_220620.csv")
 #Loading
 
 mtd<-fread(mtd_file,
-            select = c("sample","Group_name","Gender","group_sex",
+            select = c("sample","Group_name","Gender","Group_Sex",
                        "Weight..g.","Weight.at.term..lbs.","GA..wk.","Length..cm.","Mat.Age","HC..cm.","PI","SeqDepth",
                        "latino","Preterm","GDM","Drugs","Etoh", "Smoking",
                        "Race","Labor","batch","date","DNA.extraction","sequencing",
@@ -68,19 +68,21 @@ meth[,n.methyl.not.zero:=rowSums(.SD>0&.SD<10,na.rm = T),.SDcols=mtd$sample]
 
 #   see 01A-CpG_filtering to see how we determine the threshold,
 
-meth<-meth[msp1c>quantile(msp1c,0.125,na.rm=T)&n.na==0]
+methf<-meth[msp1c>quantile(msp1c,0.125,na.rm=T)&n.na==0]
 
-meth<-meth[n.not.methyl>4]
-meth<-meth[confidence_score>quantile(confidence_score,0.2,na.rm=T)]
-meth<-meth[!(pct.zero>0.7&n.methyl.not.zero==0)]
+methf<-methf[n.not.methyl>4]
+methf<-methf[confidence_score>quantile(confidence_score,0.2,na.rm=T)]
+methf<-methf[!(pct.zero>0.7&n.methyl.not.zero==0)]
 
-meth #754931 CpGs after filtering
+methf #754931 CpGs after filtering
 
+fwrite(meth,"datasets/cd34/meth_data_filtered.csv.gz")
 
 
 #FOCUS ON CTRL LGA
 mtd<-mtd[group%in%c("CTRL","LGA")]
 fwrite(mtd,"datasets/cd34/metadata_cl_190421.csv",sep=";")
+mtd<-fread("datasets/cd34/metadata_cl_190421.csv",sep=";")
 
 meth<-meth[,.SD,.SDcols=c("cpg_id",mtd$sample)]
 
@@ -105,6 +107,7 @@ pca<-prcomp(t(meth_mat))
 pc_mtd<-merge(mtd,data.table(pca$x,keep.rownames = "sample"))
 
 fwrite(pc_mtd,"datasets/cd34/metadata_pcs_cl_190421.csv",sep=";")
+pc_mtd<-fread("datasets/cd34/metadata_pcs_cl_190421.csv",sep=";")
 
 ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC2,col=group))
 ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC2,col=ponderal_index))
@@ -189,7 +192,7 @@ vars_to_include<-c("batch","mat.age","group_complexity_fac","group","latino","PC
 #DATA MODELING and DMC analysis with limma
 # rm samples without all necessary clinical infos
 mtd_f<-pc_mtd[,to_keep:=rowSums(is.na(.SD))==0,.SDcols=vars_to_include][to_keep==T]
-
+table(mtd_f$group,mtd_f$sex)
 formule<- ~0 + group_sex   + batch+ group_complexity_fac +mat.age  + latino + PC2
 
 mtd_f[,group_sex:=factor(group_sex,levels = unique(mtd_f$group_sex))]
@@ -204,12 +207,13 @@ fit2  <- contrasts.fit(fit, cont.matrix)
 fit2  <- eBayes(fit2)
 
 res<-data.table(topTable(fit2,coef = "C.L",n = Inf),keep.rownames = "cpg_id")
-res[adj.P.Val<=0.05] #43 cpgs
-res[P.Value<0.001&abs(logFC)>30] #4774 cpgs
+res[adj.P.Val<=0.1&abs(logFC)>25] #1255 cpgs
+
 fwrite(res,fp(out,"res_limma.tsv.gz"),sep="\t")
+res<-fread(fp(out,"res_limma.tsv.gz"),sep="\t")
 
 p<-ggplot(res)+
-  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<0.001&abs(logFC)>30))+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=adj.P.Val<0.1&abs(logFC)>25))+
   scale_color_manual(values = c("grey","red"))
 ggsave(fp(out,"volcano_plot.png"),plot=p,height=5,width=7)
 
@@ -220,7 +224,7 @@ ggsave(fp(out,"volcano_plot.png"),plot=p,height=5,width=7)
 #Validation cohorts
 vars_to_include<-c("mat.age","group_complexity_fac","group","latino","PC2")
 
-mtd_f<-mtd[rowSums(is.na(mtd[,.SD,.SDcols=vars_to_include]))==0][batch==2]
+mtd_f<-pc_mtd[rowSums(is.na(pc_mtd[,.SD,.SDcols=vars_to_include]))==0][batch==2]
 formule<- ~0 + group_sex  + group_complexity_fac +mat.age  + latino + PC2
 
 design<-model.matrix(formule,data = data.frame(mtd_f,row.names = "sample"))
@@ -246,7 +250,7 @@ res<-Reduce(rbind,lapply(colnames(cont.matrix), function(comp)data.table(topTabl
 fwrite(res,fp(out,"res_limma_cohort2.tsv.gz"),sep="\t")
 res<-fread(fp(out,"res_limma_cohort2.tsv.gz"),sep="\t")
 
-table(res[adj.P.Val<0.2&abs(logFC)>30][,hyper_meth:=logFC>0][,.(hyper_meth,compa)])
+table(res[adj.P.Val<0.1&abs(logFC)>25][,hyper_meth:=logFC>0][,.(hyper_meth,compa)])
 p<-ggplot(res[compa%in%c("C.L","CF.LF",'CM.LM',"LM.LF")])+
   geom_point(aes(x=logFC,y=-log10(P.Value),col=adj.P.Val<0.2&abs(logFC)>30))+
   facet_wrap("compa")+
@@ -254,11 +258,13 @@ p<-ggplot(res[compa%in%c("C.L","CF.LF",'CM.LM',"LM.LF")])+
 ggsave(fp(out,"volcano_plot_cohort2.png"),plot=p,height=5,width=7)
 
 #comp to cohort 1 
-mtdf<-mtd[rowSums(is.na(mtd[,.SD,.SDcols=var_to_model]))==0][batch==1]
-formule<- ~0 + group_sex  + latino + Mat.Age + Group_Complexity_Fac 
+mtd_f<-pc_mtd[rowSums(is.na(pc_mtd[,.SD,.SDcols=vars_to_include]))==0][batch==1]
+formule<- ~0 + group_sex  + group_complexity_fac +mat.age  + latino + PC2
 
-design<-model.matrix(formule,data = data.frame(mtdf,row.names = "sample"))
-fit <- lmFit(data.frame(meth,row.names = "locisID")[,mtdf$sample], design)
+design<-model.matrix(formule,data = data.frame(mtd_f,row.names = "sample"))
+
+fit <- lmFit(data.frame(meth,row.names = "cpg_id")[,mtd_f$sample], design)
+
 
 cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
                              F.M="(group_sexCTRL_F+group_sexLGA_F)-(group_sexCTRL_M+group_sexLGA_M)",
@@ -274,12 +280,16 @@ cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sex
 fit2  <- contrasts.fit(fit, cont.matrix)
 fit2  <- eBayes(fit2)
 
+res<-Reduce(rbind,lapply(colnames(cont.matrix), function(comp)data.table(topTable(fit2,coef = comp,n = Inf),keep.rownames = "cpg_id")[,compa:=comp]))
+fwrite(res,fp(out,"res_limma_cohort1.tsv.gz"),sep="\t")
+res<-fread(fp(out,"res_limma_cohort1.tsv.gz"),sep="\t")
+
+
 #merge res cohort 1 and 2
-res<-rbind(res[,cohort:=2],
-           Reduce(rbind,lapply(colnames(cont.matrix),
-                               function(comp)data.table(topTable(fit2,coef = comp,n = Inf),
-                                                        keep.rownames = "cpg_id")[,compa:=comp]))[,cohort:=1])
+res<-rbind(fread(fp(out,"res_limma_cohort1.tsv.gz"))[,cohort:=1],fread(fp(out,"res_limma_cohort2.tsv.gz"))[,cohort:=2])
+
 fwrite(res,fp(out,"res_limma_cohorts.tsv.gz"),sep="\t")
+res<-fread(fp(out,"res_limma_cohorts.tsv.gz"),sep="\t")
 #cl
 ggplot(res[compa%in%c("C.L")])+
   geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-4&abs(logFC)>30),size=0.1)+
