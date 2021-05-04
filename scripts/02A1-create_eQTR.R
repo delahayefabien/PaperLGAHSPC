@@ -206,10 +206,13 @@ fwrite(eqtls_wb,fp(out,"eqtls_wb_with_eQTR.csv.gz"))
 
 #eQTR_id for eQTR link to gene symbol and save in a bed files :
 eqtls_wb[!is.na(gene),eqtr_id:=paste(gene,eQTR,sep="-")]
-eqtrs_symbol<-unique(eqtls_wb[!is.na(eQTR)&!is.na(gene),.(chr,start.eQTR,end.eQTR,eqtr_id,gene)])
-eqtrs_symbol#20k eqtr
+eqtls_wb[minLocal==T,pos.min.local:=pos]
+eqtls_wb[,tss_dist:=tss_distance]
+eqtls_wb[,pval_link:=pval_nominal]
+eqtrs_symbol<-unique(eqtls_wb[!is.na(eQTR)&!is.na(gene)&minLocal==T][order(gene,eQTR,abs(tss_dist))][,.(chr,start.eQTR,end.eQTR,eqtr_id,pos.min.local,pval_link,tss_dist,gene)])
+eqtrs_symbol#27k eqtr
 unique(eqtrs_symbol,by="gene") #1800 genes
-fwrite(eqtrs_symbol,fp(out,"whole_blood_eQTR_symbol.bed"),sep = "\t",col.names = F)
+fwrite(eqtrs_symbol,fp(out,"whole_blood_eQTR_symbol.bed"),sep = "\t")
 
 
 
@@ -277,10 +280,15 @@ fwrite(eqtls_meta,fp(out,"eqtls_meta_with_eQTR.csv.gz"))
 
 #eQTR_id for eQTR link to gene symbol and save in a bed files :
 eqtls_meta[!is.na(gene),eqtr_id:=paste(gene,eQTR,sep="-")]
-eqtrs_symbol<-unique(eqtls_meta[!is.na(eQTR)&!is.na(gene),.(chr,start.eQTR,end.eQTR,eqtr_id,gene)])
-eqtrs_symbol#32k eqtr
+eqtls_meta[minLocal==T,pos.min.local:=pos]
+eqtls_meta[,pval_link:=PVALUE_FE]
+eqtrs_symbol<-unique(eqtls_meta[!is.na(eQTR)&!is.na(gene)&minLocal==T][order(gene,eQTR,abs(tss_dist))][,.(chr,start.eQTR,end.eQTR,eqtr_id,pos.min.local,pval_link,tss_dist,gene)])
+eqtrs_symbol#38k eqtr
 unique(eqtrs_symbol,by="gene") #4100 genes
-fwrite(eqtrs_symbol,fp(out,"tissue_wide_eQTR_symbol.bed"),sep = "\t",col.names = F)
+fwrite(eqtrs_symbol,fp(out,"tissue_wide_eQTR_symbol.bed"),sep = "\t")
 
 
 #III) merge eQTRs
+eqtrs<-rbind(fread(fp(out,"tissue_wide_eQTR_symbol.bed"))[,tissue:="tissue_wide"],
+      fread(fp(out,"whole_blood_eQTR_symbol.bed"))[,tissue:="whole_blood"])
+fwrite(eqtrs,fp(out,"all_eQTR_symbol.bed"))
