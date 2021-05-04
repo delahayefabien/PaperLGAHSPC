@@ -81,4 +81,4 @@ summary(abs(eqtl_meta$tss_dist))
 eqtl_meta[,closest:=abs(tss_dist)==min(abs(tss_dist)),by=c("chr","pos","gene")]
 eqtl_meta<-eqtl_meta[closest==T]
 #and save
-fwrite(eqtl_meta,fp(out,"tissue_wide_signif_variant_gene_pairs.csv.gz"))
+fwrite(eqtl_meta,fp(out,"tissue_wide_signif_variant_gene_pairs_hg19.csv.gz"))
