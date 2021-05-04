@@ -12,7 +12,8 @@ res<-fread("outputs/01-lga_vs_ctrl_limma_DMCs_analysis/res_limma.tsv.gz",sep="\t
            col.names = c("cpg_id","pval","padj","avg.meth","meth.change"))
 mtd<-fread("datasets/cd34/metadata_pcs_cl_190421.csv",sep=";")
 
-
+#link cpg to gene and weitgh link confidence
+#see 02A
 cpgs_ref<-fread("ref/2020-06-29_All_CpG-Gene_links.csv")
 max(abs(cpgs_ref[in_eQTR==F]$tss_dist))
 cpgs_ref<-cpgs_ref[,cpg_id:=locisID][,-"locisID"]
@@ -128,7 +129,10 @@ for(i in 1:length(xs)){
   rs_ncpg_sig2[i]<-summary(lm(gene_score_add~ncpg.sig.gene,data = resg_test))$r.squared
 
 
-} #3.4 is best : 
+}
+plot(xs,rs_ncpg2)
+plot(xs,rs_ncpg_sig2)
+#3.4 is best : 
 # [1] 3.4
 # 
 # Call:
