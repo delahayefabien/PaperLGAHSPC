@@ -76,7 +76,7 @@ methf<-methf[!(pct.zero>0.7&n.methyl.not.zero==0)]
 
 methf #754931 CpGs after filtering
 
-fwrite(meth,"datasets/cd34/meth_data_filtered.csv.gz")
+fwrite(methf,"datasets/cd34/meth_data_filtered.csv.gz")
 
 
 #FOCUS ON CTRL LGA
@@ -84,9 +84,8 @@ mtd<-mtd[group%in%c("CTRL","LGA")]
 fwrite(mtd,"datasets/cd34/metadata_cl_190421.csv",sep=";")
 mtd<-fread("datasets/cd34/metadata_cl_190421.csv",sep=";")
 
-meth<-meth[,.SD,.SDcols=c("cpg_id",mtd$sample)]
 
-all(mtd$sample%in%colnames(meth))
+all(mtd$sample%in%colnames(methf))
 nrow(mtd) #79
 table(mtd[,.(group,sex)])
 #       sex
@@ -102,7 +101,7 @@ lapply(mtd[,.SD,.SDcols=categorical_vars],function(x)sum(table(x)==1)) #exclude 
 
 mtd<-mtd[,-c("sequencing","date")]
 library(ggrepel)
-meth_mat<-as.matrix(data.frame(meth,row.names = "cpg_id")[,mtd$sample])
+meth_mat<-as.matrix(data.frame(methf,row.names = "cpg_id")[,mtd$sample])
 pca<-prcomp(t(meth_mat))
 pc_mtd<-merge(mtd,data.table(pca$x,keep.rownames = "sample"))
 
@@ -180,24 +179,25 @@ pc_mtd[,pct_zero:=colSums(meth_mat[,pc_mtd$sample]==0)/nrow(meth_mat)]
 ggplot(pc_mtd)+geom_point(aes(x=mat.age,y=pct_zero,col=mat.age))
 
 
-#include group_sex in the model insteag of group ?
+#include group_sex in the model instead of group ?
 summary(lm(PC1~group_complexity_fac+group_sex+latino,data = pc_mtd)) #can see that effect ++ in lga F than Lga M, and CtrlM not sig
 
 
 
 # so include batch,mat.age, group_complexity_fac,group_sex and PC2 in the model 
-vars_to_include<-c("batch","mat.age","group_complexity_fac","group","latino","PC2")
+vars_to_include<-c("batch","mat.age","group_complexity_fac","group_sex","latino","PC2")
 
 
 #DATA MODELING and DMC analysis with limma
-# rm samples without all necessary clinical infos
+# exclude samples without all necessary clinical infos
 mtd_f<-pc_mtd[,to_keep:=rowSums(is.na(.SD))==0,.SDcols=vars_to_include][to_keep==T]
+fwrite(mtd_f,"datasets/cd34/metadata_cl_pcs_040521.csv")
 table(mtd_f$group,mtd_f$sex)
 formule<- ~0 + group_sex   + batch+ group_complexity_fac +mat.age  + latino + PC2
 
 mtd_f[,group_sex:=factor(group_sex,levels = unique(mtd_f$group_sex))]
 design<-model.matrix(formule,data = data.frame(mtd_f,row.names = "sample"))
-fit <- lmFit(data.frame(meth,row.names = "cpg_id")[,mtd_f$sample], design)
+fit <- lmFit(data.frame(methf,row.names = "cpg_id")[,mtd_f$sample], design)
 
 cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
                              levels=design)
@@ -222,92 +222,32 @@ ggsave(fp(out,"volcano_plot.png"),plot=p,height=5,width=7)
 
 
 #Validation cohorts
-vars_to_include<-c("mat.age","group_complexity_fac","group","latino","PC2")
+#n by cohorts
+table(mtd_f$batch)
+vars_to_include<-c("mat.age","group_complexity_fac","group_sex","latino","PC2")
 
-mtd_f<-pc_mtd[rowSums(is.na(pc_mtd[,.SD,.SDcols=vars_to_include]))==0][batch==2]
-formule<- ~0 + group_sex  + group_complexity_fac +mat.age  + latino + PC2
-
-design<-model.matrix(formule,data = data.frame(mtd_f,row.names = "sample"))
-
-fit <- lmFit(data.frame(meth,row.names = "cpg_id")[,mtd_f$sample], design)
-
-
-cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
-                             F.M="(group_sexCTRL_F+group_sexLGA_F)-(group_sexCTRL_M+group_sexLGA_M)",
-                             CF.CM="group_sexCTRL_F-group_sexCTRL_M",
+res_batch<-Reduce(rbind,lapply(1:2,function(b){
+  mtd_fc<-mtd_f[batch==b]
+  formule<- ~0 + group_sex  + group_complexity_fac +mat.age  + latino + PC2
+  design<-model.matrix(formule,data = data.frame(mtd_fc,row.names = "sample"))
+  fit <- lmFit(data.frame(methf,row.names = "cpg_id")[,mtd_fc$sample], design)
+  cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
                              CF.LF="group_sexCTRL_F-group_sexLGA_F",
-                             CF.LM="group_sexCTRL_F-group_sexLGA_M",
                              CM.LM="group_sexCTRL_M-group_sexLGA_M",
-                             CM.LF="group_sexCTRL_M-group_sexLGA_F",
-                             LM.LF="group_sexLGA_M-group_sexLGA_F",
                              levels=design)
+  fit2  <- contrasts.fit(fit, cont.matrix)
+  fit2  <- eBayes(fit2)
+  res<-Reduce(rbind,lapply(colnames(cont.matrix), function(comp)data.table(topTable(fit2,coef = comp,n = Inf),keep.rownames = "cpg_id")[,compa:=comp]))
+  return(res[,batch:=b])
+}))
 
-
-fit2  <- contrasts.fit(fit, cont.matrix)
-fit2  <- eBayes(fit2)
-
-res<-Reduce(rbind,lapply(colnames(cont.matrix), function(comp)data.table(topTable(fit2,coef = comp,n = Inf),keep.rownames = "cpg_id")[,compa:=comp]))
-fwrite(res,fp(out,"res_limma_cohort2.tsv.gz"),sep="\t")
-res<-fread(fp(out,"res_limma_cohort2.tsv.gz"),sep="\t")
-
-table(res[adj.P.Val<0.1&abs(logFC)>25][,hyper_meth:=logFC>0][,.(hyper_meth,compa)])
-p<-ggplot(res[compa%in%c("C.L","CF.LF",'CM.LM',"LM.LF")])+
-  geom_point(aes(x=logFC,y=-log10(P.Value),col=adj.P.Val<0.2&abs(logFC)>30))+
-  facet_wrap("compa")+
+fwrite(res_batch,fp(out,"res_limma_cohorts.tsv.gz"),sep="\t")
+table(res_batch[adj.P.Val<=0.1,.(compa,batch)])
+p<-ggplot(res_batch)+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-3&abs(logFC)>25),size=0.1)+
+  facet_grid(batch~compa)+
   scale_color_manual(values = c("grey","red"))
-ggsave(fp(out,"volcano_plot_cohort2.png"),plot=p,height=5,width=7)
-
-#comp to cohort 1 
-mtd_f<-pc_mtd[rowSums(is.na(pc_mtd[,.SD,.SDcols=vars_to_include]))==0][batch==1]
-formule<- ~0 + group_sex  + group_complexity_fac +mat.age  + latino + PC2
-
-design<-model.matrix(formule,data = data.frame(mtd_f,row.names = "sample"))
-
-fit <- lmFit(data.frame(meth,row.names = "cpg_id")[,mtd_f$sample], design)
-
-
-cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
-                             F.M="(group_sexCTRL_F+group_sexLGA_F)-(group_sexCTRL_M+group_sexLGA_M)",
-                             CF.CM="group_sexCTRL_F-group_sexCTRL_M",
-                             CF.LF="group_sexCTRL_F-group_sexLGA_F",
-                             CF.LM="group_sexCTRL_F-group_sexLGA_M",
-                             CM.LM="group_sexCTRL_M-group_sexLGA_M",
-                             CM.LF="group_sexCTRL_M-group_sexLGA_F",
-                             LM.LF="group_sexLGA_M-group_sexLGA_F",
-                             levels=design)
-
-
-fit2  <- contrasts.fit(fit, cont.matrix)
-fit2  <- eBayes(fit2)
-
-res<-Reduce(rbind,lapply(colnames(cont.matrix), function(comp)data.table(topTable(fit2,coef = comp,n = Inf),keep.rownames = "cpg_id")[,compa:=comp]))
-fwrite(res,fp(out,"res_limma_cohort1.tsv.gz"),sep="\t")
-res<-fread(fp(out,"res_limma_cohort1.tsv.gz"),sep="\t")
-
-
-#merge res cohort 1 and 2
-res<-rbind(fread(fp(out,"res_limma_cohort1.tsv.gz"))[,cohort:=1],fread(fp(out,"res_limma_cohort2.tsv.gz"))[,cohort:=2])
-
-fwrite(res,fp(out,"res_limma_cohorts.tsv.gz"),sep="\t")
-res<-fread(fp(out,"res_limma_cohorts.tsv.gz"),sep="\t")
-#cl
-ggplot(res[compa%in%c("C.L")])+
-  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-4&abs(logFC)>30),size=0.1)+
-  facet_wrap("cohort")+
-  scale_color_manual(values = c("grey","red"))
-
-#cflf
-ggplot(res[compa%in%c("CF.LF")])+
-  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-4&abs(logFC)>30),size=0.1)+
-  facet_wrap("cohort")+
-  scale_color_manual(values = c("grey","red"))
-
-#cmlm
-ggplot(res[compa%in%c("CM.LM")])+
-  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-4&abs(logFC)>30),size=0.1)+
-  facet_wrap("cohort")+
-  scale_color_manual(values = c("grey","red"))
-
+ggsave(fp(out,"volcanos_limma_cohorts.png"),p,width = 12,height = 5)
 
 
 
