@@ -13,7 +13,7 @@ res<-fread("outputs/01-lga_vs_ctrl_limma_DMCs_analysis/res_limma.tsv.gz",sep="\t
 mtd<-fread("datasets/cd34/metadata_pcs_cl_190421.csv",sep=";")
 
 #link cpg to gene and weitgh link confidence
-#see 02A
+#see 02A 
 cpgs_ref<-fread("ref/2020-06-29_All_CpG-Gene_links.csv")
 max(abs(cpgs_ref[in_eQTR==F]$tss_dist))
 cpgs_ref<-cpgs_ref[,cpg_id:=locisID][,-"locisID"]

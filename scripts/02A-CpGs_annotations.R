@@ -55,8 +55,8 @@ fwrite(cpgs_genes_1,fp(out,"cpgs_closest_gene_tss_linked_within_200kb_around.tsv
 #by presence in eQTL region
 #need first create eQTR
 #see 02A1-create_eQTR
-cpgs_eQTR<-bed_inter(a=cpgs[,start:=pos][,end:=pos+1][,.(chr,start,end,cpgID)][order(chr,start)],
-          b="ref/eQTL/whole_blood_and_tissue_wide_eQTR_hgnc_gene_hg19.bed",
+cpgs_eQTR<-bed_inter(a=cpgs[,start:=pos][,end:=pos+1][,.(chr,start,end,cpg_id)][order(chr,start)],
+          b=eqtr[,.(chr,start,end,eqtr_id)],
           select = c(4,8),col.names = c("cpgID","gene"))
 
 cpgs_eQTR #887k  cpgs - snp+/-500pb match
