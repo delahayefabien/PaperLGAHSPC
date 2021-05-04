@@ -55,25 +55,41 @@ fwrite(cpgs_genes_1,fp(out,"cpgs_closest_gene_tss_linked_within_200kb_around.tsv
 #by presence in eQTL region
 #need first create eQTR
 #see 02A1-create_eQTR
-cpgs_eQTR<-bed_inter(a=cpgs[,start:=pos][,end:=pos+1][,.(chr,start,end,cpg_id)][order(chr,start)],
-          b=eqtr[,.(chr,start,end,eqtr_id)],
-          select = c(4,8),col.names = c("cpgID","gene"))
+eqtrs<-fread("outputs/02A1-create_eQTR/all_eQTR_symbol.bed")
+eqtrs[,eqtr_id:=paste(eqtr_id,tissue,sep="-")]
+eqtrs<-unique(eqtrs[!is.na(start.eQTR)],by="eqtr_id")
+table(eqtrs$tissue)
+# tissue_wide whole_blood 
+#       32271       17817 
 
-cpgs_eQTR #887k  cpgs - snp+/-500pb match
-unique(cpgs_eQTR) #554k cpg-gene match
-unique(cpgs_eQTR,by="cpgID")#246k cpgs linked to a gene
-unique(cpgs_eQTR,by="gene")#13k genes linked to a cpg
+table(unique(eqtrs,by=c("gene","tissue"))$tissue)
+# tissue_wide whole_blood 
+#        4137        1777 
+
+
+cpgs_eQTR<-bed_inter(a=cpgs[,start:=pos][,end:=pos+1][,.(chr,start,end,cpg_id)][order(chr,start)],
+          b=eqtrs[,start:=start.eQTR][,end:=end.eQTR][,.(chr,start,end,eqtr_id)][order(chr,start)],
+          select = c(4,8),col.names = c("cpg_id","eqtr_id"))
+
+cpgs_eQTR #387k  cpgs - eQTR match
+cpgs_eQTR<-merge(cpgs_eQTR,unique(eqtrs[,.(eqtr_id,gene,tissue)]),all.x=T)
+unique(cpgs_eQTR,by="cpg_id")#220368k cpgs linked to a gene
+unique(cpgs_eQTR,by="gene")#4k genes linked to a cpg
 cpgs_eQTR[,in_eQTR:=T]
+cpgs_eQTR[,in_both_eQTR:=all(c("whole_blood","tissue_wide")%in%tissue),by=.(cpg_id,gene)]
+unique(cpgs_eQTR[in_both_eQTR==T],by="cpg_id") #(only) 1318 cpg in both tissue
+unique(cpgs_eQTR[in_both_eQTR==T],by="gene") #in (only) 86 genes
+cpgs_eQTR<-unique(cpgs_eQTR[,-c("tissue","eqtr_id")])
 
 #merge the 2 links
-cpgs_genes_4[,in_eQTR:=F]
-cpgs_genes<-merge(cpgs_genes_4[,.(cpgID,gene,in_eQTR,tss_dist)],cpgs_eQTR,all=T)
+cpgs_genes_1[,in_eQTR:=F]
+cpgs_genes<-merge(cpgs_genes_1[,.(cpg_id,gene,in_eQTR,tss_dist)],cpgs_eQTR,all=T)
 cpgs_genes[in_eQTR==T]
 
 #merge with coord
-cpgs_genes<-merge(cpgs[,.(cpgID,chr,pos)],cpgs_genes,all.x = T,by="cpgID")
+cpgs_genes<-merge(cpgs[,.(cpg_id,chr,pos)],cpgs_genes,all.x = T,by="cpg_id")
 
-fwrite(cpgs_genes,fp(out,"cpgs_4closest_gene_tss_linked_within_200kb_around_and_eQTR_linked_genes.tsv"),sep="\t")
+fwrite(cpgs_genes,fp(out,"all_cpgs_gene_links.csv.gz"))
 
 #2)cpgs_regulatory region
 #ensembl regulatory reg matching
