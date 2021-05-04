@@ -93,80 +93,29 @@ fwrite(cpgs_genes,fp(out,"all_cpgs_gene_links.csv.gz"))
 
 #2)cpgs_regulatory region
 #ensembl regulatory reg matching
-cpgs_ensembl<-bed_inter(a=unique(cpgs,by="cpgID")[,chr:=str_remove(chr,'chr')][,start:=pos][,end:=pos+1][,.(chr,start,end,cpgID)][order(chr,start)],
+cpgs_ensembl<-bed_inter(a=unique(cpgs,by="cpg_id")[,chr:=str_remove(chr,'chr')][,start:=pos][,end:=pos+1][,.(chr,start,end,cpg_id)][order(chr,start)],
           b="ref/ensembl_regulatory/ensembl_regulatory_hg19.bed",
-          select = c(4,8),col.names = c("cpgID","ensembl_regulatory_domain"))
+          select = c(4,8),col.names = c("cpg_id","ensembl_regulatory_domain"))
 
 
 
-cpgs_ensembl[,ensembl_regulatory_domain:=paste(ensembl_regulatory_domain,collapse = "/"),by="cpgID"] 
+cpgs_ensembl[,ensembl_regulatory_domain:=paste(ensembl_regulatory_domain,collapse = "/"),by="cpg_id"] 
 cpgs_ensembl<-unique(cpgs_ensembl)
 cpgs_ensembl
 
-cpgs_chromatin<-res[,.(cpgID,chr,pos,chromatin_state,chromatin_feature)]
+chrine_feat<-fread("ref/Chromatin_Annot/CBP/CD34_all_chromatin_feature.csv")
 
-cpgs_reg<-merge(cpgs_chromatin,cpgs_ensembl,all.x=T,by="cpgID")
+cpgs_chrine<-bed_inter(a=unique(cpgs,by="cpg_id")[,start:=pos][,end:=pos+1][,.(chr,start,end,cpg_id)][order(chr,start)],
+          b=chrine_feat[,.(chr,start,end,type)][order(chr,start)],
+          select = c(4,8),col.names = c("cpg_id","chromatin_feature"))
 
-fwrite(cpgs_reg,fp(out,"cpgs_annot_ensembl_regulatory_domain_and_chromHMM_chromatin_features.tsv"),sep="\t")
+cpgs_reg<-merge(cpgs_chrine,cpgs_ensembl,all.x=T,by="cpg_id")
 
-cpgs_anno<-merge(cpgs_reg,cpgs_genes,all=T,by="cpgID")
+fwrite(cpgs_reg,fp(out,"cpgs_annot_ensembl_regulatory_domain_and_chromHMM_chromatin_features.csv.gz"))
 
-fwrite(unique(cpgs_anno[order(cpgID,gene)][,.(cpgID,chr,pos,in_eQTR,tss_dist,gene,chromatin_state,chromatin_feature,ensembl_regulatory_domain)]),
-       fp(out,"cpgs_annot.tsv"),sep="\t")
+cpgs_anno<-merge(cpgs_reg,cpgs_genes,all=T,by="cpg_id")
 
+fwrite(unique(cpgs_anno[order(cpg_id,gene)][,.(cpg_id,chr,pos,in_eQTR,tss_dist,gene,chromatin_feature,ensembl_regulatory_domain)]),
+       fp(out,"cpgs_annot.csv.gz"))
 
-# Calculate GeneScore
-
-#1) calculate cpg weight
-cpgs_genes<-cpgs_anno[!is.na(gene)&gene!=""]
-unique(cpgs_genes,by="cpgID") #741408/~800k cpgs link to a gene
-
-unique(cpgs_genes[in_eQTR==T],by="cpgID") #dont 246k linked thx to eQTR
-cpgs_genes[,double.linked:=any(in_eQTR==T)&any(in_eQTR==F),by=c("cpgID","gene")]
-unique(cpgs_genes[double.linked==T],by="cpgID")#dont 63504 also gene linked based on tss
-#=> + ~180k cpgs gene link thx to eQTR
-
-# a) linksWeight
-cpgs_genes[in_eQTR==F,links_score:=sapply(abs(tss_dist),function(x){
-  if(x<1000)return(1)
-  else if(x<20000)return(0.5+0.5*sqrt(1000/x))
-  else return(0.5*sqrt(20000/x))
-    })]
-
-cpgs_genes[in_eQTR==T,links_score:=1]
-
-cpgs_genes[,links_weight:=max(links_score),by=c("cpgID","gene")]
-
-
-#b) Regulatory Weights
-cpgs_reg<-unique(cpgs_genes,by=c("cpgID"))
-unique(cpgs_reg$chromatin_feature)
-cpgs_reg[,chromatin_score:=sapply(chromatin_feature,function(x){
-      if(x%in%c("Promoter","Active Enhancer"))return(1)
-      else if(x=="Inactive Enhancer")return(0.75)
-      else if(x%in%"Gene Body")return(0.5)
-      else return(0)
-    })]
-
-
-unique(cpgs_reg$chromatin_feature)
-cpgs_reg[,ensembl_reg_score:=sapply(ensembl_regulatory_domain,function(x){
-    vecX<-strsplit(as.character(x),"/")[[1]]
-    if(any(c("CTCF_binding_site","promoter","enhancer")%in%vecX)){
-      score<-0.5
-    }else if(any(c("open_chromatin_region","promoter_flanking_region")%in%vecX)){
-      score<-0.25
-    }else{
-      score<-0
-    }
-    if("TF_binding_site"%in%vecX){
-      score<-score+0.5
-    }
-    return(score)
-  })]
-
-cpgs_reg[,regul_weight:=(0.5+1.5*((chromatin_score+ensembl_reg_score)/2))]
-
-cpgs_score<-merge(cpgs_genes,cpgs_reg[,.(cpgID,chromatin_score,ensembl_reg_score,regul_weight)],by="cpgID")
-fwrite(cpgs_score,fp(out,"cpgs_genes_annot_and_weight_reference.tsv"),sep="\t")
 
