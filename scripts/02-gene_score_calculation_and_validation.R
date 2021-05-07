@@ -2,7 +2,6 @@
 #Gene score calculation and validation
 source("scripts/utils/new_utils.R")
 source("scripts/utils/methyl_utils.R")
-library(limma)
 out<-"outputs/02-gene_score_calculation_and_validation"
 dir.create(out)
 
@@ -13,217 +12,345 @@ res<-fread("outputs/01-lga_vs_ctrl_limma_DMCs_analysis/res_limma.tsv.gz",sep="\t
 mtd<-fread("datasets/cd34/metadata_pcs_cl_190421.csv",sep=";")
 
 #link cpg to gene and weitgh link confidence
-#see 02A 
-cpgs_ref<-fread("ref/2020-06-29_All_CpG-Gene_links.csv")
-max(abs(cpgs_ref[in_eQTR==F]$tss_dist))
-cpgs_ref<-cpgs_ref[,cpg_id:=locisID][,-"locisID"]
+# 1)annots cpg 
+#see 02A-
 
-res<-merge(res,cpgs_ref,by="cpg_id")
+# 2) calculate cpg weight
+cpgs_anno<-fread("outputs/02A-CpGs_annotations/cpgs_annot.csv.gz")
+cpgs_genes<-cpgs_anno[!is.na(gene)&gene!=""]
+rm(cpgs_anno)
+unique(cpgs_genes,by="cpg_id") #1,2M/~1.7M cpgs link to a gene
 
-#add useful info :
-res[,region_type:=ifelse(abs(tss_dist)<=2000,"promoter","other"),by="gene"]
-res[,n.cpg.gene:=.N,by=.(gene)]
-res[,n.cpg.gene.region:=.N,by=.(gene,region_type)]
-res[,avg.meth.change.region:=mean(meth.change),by=c('region_type',"gene")]
-res[,avg.m.log10.pval.region:=mean(-log10(pval)),by=c('region_type',"gene")]
-res[,avg.dmc_score.region:=mean(-log10(pval)*meth.change),by=c('region_type',"gene")]
+unique(cpgs_genes[in_eQTR==T],by="cpg_id") #dont 320k linked thx to eQTR
+cpgs_genes[,double.linked:=any(in_eQTR==T)&any(in_eQTR==F),by=c("cpg_id","gene")]
+unique(cpgs_genes[double.linked==T],by="cpg_id")#dont 67k also gene linked based on tss
+#=> + ~250k cpgs gene link thx to eQTR
 
-res[,avg.meth.change:=mean(meth.change),by=c("gene")]
-res[,avg.m.log10.pval:=mean(-log10(pval)),by=c("gene")]
-res[,avg.dmc_score:=mean(-log10(pval)*meth.change),by=c("gene")]
+# a) linksWeight
+cpgs_genes[in_eQTR==F,links_score:=sapply(abs(tss_dist),function(x){
+  if(x<1000)return(1)
+  else if(x<20000)return(0.5+0.5*sqrt(1000/x))
+  else return(0.5*sqrt(20000/x))
+    })]
+
+summary(cpgs_genes[in_eQTR==F]$links_score)
+ #   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+ # 0.1581  0.3156  0.6172  0.5612  0.7369  1.0000 
+
+summary(unique(cpgs_genes[in_eQTR==T&tissue=="whole_blood"],by="eqtr_id")$avg.mlog10pval)
+  # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  # 3.255   7.455  12.600  20.560  23.741 277.112 
+
+summary(cpgs_genes[tissue=="tissue_wide"]$avg.mlog10pval) #not unique because crash idk why
+  #  Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  # 29.02   53.02   73.91   79.29  103.04  191.19
+
+cpgs_genes[in_eQTR==T,links_score:=ifelse(avg.mlog10pval>quantile(avg.mlog10pval,0.9),
+                                          1,
+                                          avg.mlog10pval/quantile(avg.mlog10pval,0.9))
+           ,by="tissue"]
+
+summary(cpgs_genes[in_eQTR==T&tissue=="whole_blood"]$links_score)
+summary(cpgs_genes[in_eQTR==T&tissue=="tissue_wide"]$links_score)
+cpgs_genes[,links_weight:=max(links_score),by=c("cpg_id","gene")]
+
+
+#b) Regulatory Weights
+cpgs_reg<-unique(cpgs_genes,by=c("cpg_id"))
+unique(cpgs_reg$chromatin_feature)
+cpgs_reg[is.na(chromatin_feature)]
+cpgs_reg[,chromatin_score:=sapply(chromatin_feature,function(x){
+      if(is.na(x))return(0)
+      else if(x%in%c(6,4))return(1)
+      else if(x==5)return(0.75)
+      else if(x%in%c(1,2,3))return(0.5)
+      else return(0)
+    })]
+
+
+unique(cpgs_reg$chromatin_feature)
+cpgs_reg[,ensembl_reg_score:=sapply(ensembl_regulatory_domain,function(x){
+    vecX<-strsplit(as.character(x),"/")[[1]]
+    if(any(c("CTCF_binding_site","promoter","enhancer")%in%vecX)){
+      score<-0.5
+    }else if(any(c("open_chromatin_region","promoter_flanking_region")%in%vecX)){
+      score<-0.25
+    }else{
+      score<-0
+    }
+    if("TF_binding_site"%in%vecX){
+      score<-score+0.5
+    }
+    return(score)
+  })]
+
+cpgs_reg[,regul_weight:=(0.5+1.5*((chromatin_score+ensembl_reg_score)/2))]
+
+cpgs_score<-merge(cpgs_genes,cpgs_reg[,.(cpg_id,chromatin_score,ensembl_reg_score,regul_weight)],by="cpg_id")
+fwrite(cpgs_score,fp(out,"cpgs_genes_annot_and_weight.csv.gz"))
+
+
+res_anno<-merge(res,cpgs_score,by="cpg_id")
 
 #GeneScore calculation
-n_min_group<-min(table(mtd$group))
-  #first, calculate CpGScore :
-res[,cpg_score:=(-log10(pval)/sqrt(n_min_group)*meth.change)*RegWeight*LinksWeight] #divided by n_sample ro normalized gene score ~ n_sample
+# pval
+res_anno[,min.pval:=min(pval[which(in_eQTR==F)],na.rm = T),by=c("gene")]
+res_anno[,avg.pval:=mean(-log10(pval[in_eQTR==F]),na.rm = T),by=c("gene")]
+res_anno[,avg.m.log10.pval:=mean(-log10(pval[in_eQTR==F]),na.rm = T),by=c("gene")]
+meth_metrics<-c("min.pval","avg.pval","avg.m.log10.pval")
+
+# dmcscore
+res_anno[,max.dmc_score:=max(-log10(pval[which(in_eQTR==F)])*abs(meth.change[which(in_eQTR==F)]),na.rm = T),by=c("gene")]
+res_anno[,avg.dmc_score:=mean(-log10(pval[in_eQTR==F])*abs(meth.change[in_eQTR==F]),na.rm = T),by=c("gene")]
+meth_metrics<-c(meth_metrics,"max.dmc_score","avg.dmc_score")
+
+# +LinksScore
+res_anno[,max.dmc_score.tss_pond:=max(-log10(pval[which(in_eQTR==F)])*abs(meth.change[which(in_eQTR==F)])*links_score[which(in_eQTR==F)],na.rm = T),by=c("gene")]
+res_anno[,avg.dmc_score.tss_pond:=sum(-log10(pval[in_eQTR==F])*abs(meth.change[in_eQTR==F])*links_score[in_eQTR==F],na.rm = T)/sum(links_score[in_eQTR==F]),by=c("gene")]
+meth_metrics<-c(meth_metrics,"max.dmc_score.tss_pond","avg.dmc_score.tss_pond")
+
+# +eQTL
+res_anno[,max.dmc_score.tss_eqtl_pond:=max(-log10(pval)*abs(meth.change)*links_weight,na.rm = T),by=c("gene")]
+res_anno[,avg.dmc_score.tss_eqtl_pond:=sum(-log10(pval)*abs(meth.change)*links_weight,na.rm = T)/sum(links_weight),by=c("gene")]
+meth_metrics<-c(meth_metrics,"max.dmc_score.tss_eqtl_pond","avg.dmc_score.tss_eqtl_pond")
 
 
-  #then, the GeneScore :
-res[,n.cpg_weight:=(1/sum(1/(abs(cpg_score)+1)))^(1/4),by="gene"] #n.cpg_weight to reduce the influence of the n_cpg by gene to the GeneScore
-ggplot(unique(res,by="gene"))+geom_point(aes(x=n.cpg.gene,y=n.cpg_weight))
-res[,gene_score:=sum(cpg_score)*n.cpg_weight,by="gene"] 
+# +annot_ensembl
+res_anno[,max.dmc_score.tss_ens_pond:=max(-log10(pval)*abs(meth.change)*links_weight*ensembl_reg_score,na.rm = T),by=c("gene")]
+res_anno[,avg.dmc_score.tss_ens_pond:=sum(-log10(pval)*abs(meth.change)*links_weight*ensembl_reg_score,na.rm = T)/sum(links_weight*ensembl_reg_score),by=c("gene")]
+meth_metrics<-c(meth_metrics,"max.dmc_score.tss_ens_pond","avg.dmc_score.tss_ens_pond")
 
-ggplot(unique(res,by="gene"))+geom_boxplot(aes(x = as.factor(n.cpg.gene),y =gene_score )) #ok
 
-# the GeneScore by region :
-res[,n_cpg_weight_region:=(1/sum(1/(abs(cpg_score)+1)))^(1/4),by=c('region_type',"gene")]
-res[region_type=="promoter",gene_score_region:=sum(cpg_score)*n_cpg_weight_region,by=c("gene")]
-res[region_type=="other",gene_score_region:=sum(abs(cpg_score))*n_cpg_weight_region,by=c("gene")]
+# +chrine
+res_anno[,max.dmc_score.tss_ens_chrine_pond:=max(-log10(pval)*abs(meth.change)*links_weight*regul_weight),by=c("gene")]
+res_anno[,avg.dmc_score.tss_ens_chrine_pond:=sum(-log10(pval)*abs(meth.change)*links_weight*regul_weight,na.rm = T)/sum(links_weight*regul_weight),by=c("gene")]
+meth_metrics<-c(meth_metrics,"max.dmc_score.tss_ens_chrine_pond","avg.dmc_score.tss_ens_chrine_pond")
 
-res[,gene_score_add:=sum(unique(abs(gene_score_region)),na.rm = T),by="gene"]
-res[is.na(gene_score_add)] 
-unique(res[gene=="A1BG",.(gene,gene_score,region_type,gene_score_region,gene_score_add)] )
-res<-res[!is.na(gene_score_add)] #rm 54 genes with no tss dist so can not calculate genescore
-ggplot(unique(res,by="gene"))+geom_boxplot(aes(x = as.factor(n.cpg.gene),y =gene_score_add )) #ok
 
-#not correlated to ncpg.gene, but crrelated to n cpg sig :
-res[,n.cpg.sig.gene:=sum(pval<0.01),by=.(gene)]
-plot(density(unique(res,by="gene")$gene_score_add))
-abline(v=70)
-unique(res,by="gene")[gene_score_add>70]
+# +nCpGweight
+res_anno[,cpg_score:=-log10(pval)*meth.change*links_weight*regul_weight] #divided by n_sample ro normalized gene score ~ n_sampleres_anno[,n.cpg_weight:=(1/sum(1/(abs(cpg_score)+1)))^(1/5),by="gene"] #n.cpg_weight to reduce the influence of the n_cpg by gene to the GeneScore
+res_anno[,n.cpg_weight:=(1/sum(1/(abs(cpg_score)+1)))^(1/5),by="gene"] #n.cpg_weight to reduce the influence of the n_cpg by gene to the GeneScore
+res_anno[,gene_score:=sum(cpg_score)*n.cpg_weight,by="gene"] 
+meth_metrics<-c(meth_metrics,"gene_score")
 
-ggplot(unique(res,by="gene"))+
-      geom_boxplot(aes(x = as.factor(n.cpg.sig.gene),y =gene_score )) #ok
-ggplot(unique(res,by="gene"))+
-      geom_boxplot(aes(x = as.factor(n.cpg.sig.gene),y =gene_score_add )) #ok
+
+# +sep prom/enh
+res_anno[,region_type:=ifelse(abs(tss_dist)<=2000,"promoter","other")]
+res_anno[is.na(tss_dist),region_type:="other"]
+res_anno[is.na(region_type)]
+
+res_anno[,n_cpg_weight_region:=(1/sum(1/(abs(cpg_score)+1)))^(1/3.8),by=c('region_type',"gene")]
+res_anno[region_type=="promoter",gene_score_region:=sum(cpg_score)*n_cpg_weight_region,by=c("gene")]
+res_anno[region_type=="other",gene_score_region:=sum(abs(cpg_score))*n_cpg_weight_region,by=c("gene")]
+
+res_anno[,gene_score_add:=sum(unique(abs(gene_score_region)),na.rm = T),by="gene"]
+meth_metrics<-c(meth_metrics,"gene_score_add")
+
+fwrite(res_anno,"outputs/02-gene_score_calculation_and_validation/res_anno.csv.gz")
+res_anno<-fread("outputs/02-gene_score_calculation_and_validation/res_anno.csv.gz")
+
+#Rq : to see how we define the weight see 02B :
+
+#valid that not correlated to ncpg.gene, but crrelated to n cpg sig :
+res_anno[,n.cpg.gene:=.N,by=.(gene)]
+res_anno[,n.cpg.sig.gene:=sum(pval<0.01),by=.(gene)]
+resg<-unique(res_anno[order(gene,pval)],by=c("gene"))
+
+ggplot(resg)+
+      geom_boxplot(aes(x = as.factor(n.cpg.gene),y =gene_score_add )) 
 
 
 #VALIDATION  Gene Score
-#valid wieight
-source("scripts/utils/new_utils.R")
-
-res<-fread("outputs/02-gene_score_calculation_and_validation/res_gene_score.tsv.gz")
-res[,ncpg.sig.gene:=sum(pval<0.01),by="gene"]
-resg<-unique(res[order(gene,region_type,pval)],by="gene")
-summary(resg$gene_score_add)
+# 1)valid wieight
 #see correl covariates with genescore
-resg
-summary(lm(gene_score~n.cpg.gene+ncpg.sig.gene+pval+meth.change+type+EnsRegScore+in_eQTR+abs(tss_dist),data = resg))
-
-summary(lm(gene_score_add~n.cpg.gene+ncpg.sig.gene+pval+meth.change+type+EnsRegScore+in_eQTR+abs(tss_dist),data = resg)) #best gene_score_add than gene_score
-
-summary(lm(gene_score_add~n.cpg.gene,data = resg))$r.squared
+summary(lm(gene_score_add~n.cpg.gene+n.cpg.sig.gene+pval+meth.change+chromatin_feature+ensembl_reg_score+in_eQTR+abs(tss_dist),data = resg)) #best gene_score_add than gene_score
 
 
-#deter if ^1/4 for n_cpg_weight were the opti one to reduce influence of n_cpg_gene (werease kept influences of n_cpg_sig)
-res_test<-copy(res)
-rs_ncpg<-rep(0,10)
-rs_ncpg_sig<-rep(0,10)
-ps<-list()
-for(i in 1:10){
-  print(i)
-  res_test[,n_cpg_weight_region:=(1/sum(1/(abs(cpg_score)+1)))^(1/i),by=c('region_type',"gene")]
-  res_test[region_type=="promoter",gene_score_region:=sum(cpg_score)*n_cpg_weight_region,by=c("gene")]
-  res_test[region_type=="other",gene_score_region:=sum(abs(cpg_score))*n_cpg_weight_region,by=c("gene")]
-  
-  res_test[,gene_score_add:=sum(unique(abs(gene_score_region)),na.rm = T),by="gene"]
-  resg_test<-unique(res_test[order(gene,region_type,pval)],by="gene")
-  print(summary(lm(gene_score_add~n.cpg.gene+ncpg.sig.gene+pval+meth.change+type+EnsRegScore+in_eQTR+abs(tss_dist),data = resg_test))) 
 
-  rs_ncpg[i]<-summary(lm(gene_score_add~n.cpg.gene,data = resg_test))$r.squared
-  rs_ncpg_sig[i]<-summary(lm(gene_score_add~ncpg.sig.gene,data = resg_test))$r.squared
-  ps[[i]]<-ggplot(resg_test)+geom_boxplot(aes(x = as.factor(n.cpg.gene),y =gene_score_add )) +ggtitle(ps("x = ",i))
-
-
-}
-wrap_plots(ps)
-
-plot(1:10,rs_ncpg)
-plot(1:10,rs_ncpg_sig)
-
-rs_ncpg2<-rep(0,10)
-rs_ncpg_sig2<-rep(0,10)
-xs<-3+(1:10/10)
-for(i in 1:length(xs)){
-  x<-xs[i]
-  print(x)
-  res_test[,n_cpg_weight_region:=(1/sum(1/(abs(cpg_score)+1)))^(1/x),by=c('region_type',"gene")]
-  res_test[region_type=="promoter",gene_score_region:=sum(cpg_score)*n_cpg_weight_region,by=c("gene")]
-  res_test[region_type=="other",gene_score_region:=sum(abs(cpg_score))*n_cpg_weight_region,by=c("gene")]
-  
-  res_test[,gene_score_add:=sum(unique(abs(gene_score_region)),na.rm = T),by="gene"]
-  resg_test<-unique(res_test[order(gene,region_type,pval)],by="gene")
-  print(summary(lm(gene_score_add~n.cpg.gene+ncpg.sig.gene+pval+meth.change+type+EnsRegScore+in_eQTR+abs(tss_dist),data = resg_test))) 
-
-  rs_ncpg2[i]<-summary(lm(gene_score_add~n.cpg.gene,data = resg_test))$r.squared
-  rs_ncpg_sig2[i]<-summary(lm(gene_score_add~ncpg.sig.gene,data = resg_test))$r.squared
-
-
-}
-plot(xs,rs_ncpg2)
-plot(xs,rs_ncpg_sig2)
-#3.4 is best : 
-# [1] 3.4
-# 
-# Call:
-# lm(formula = gene_score_add ~ n.cpg.gene + ncpg.sig.gene + pval + 
-#     meth.change + type + EnsRegScore + in_eQTR + abs(tss_dist), 
-#     data = resg_test)
-# 
-# Residuals:
-#     Min      1Q  Median      3Q     Max 
-# -421.86  -14.97   -6.11   11.93  202.40 
-# 
-# Coefficients:
-#                 Estimate Std. Error t value Pr(>|t|)    
-# (Intercept)    1.108e+01  6.097e-01  18.176  < 2e-16 ***
-# n.cpg.gene    -9.621e-04  8.930e-03  -0.108   0.9142    
-# ncpg.sig.gene  2.334e+01  1.250e-01 186.726  < 2e-16 ***
-# pval          -8.026e+00  1.084e+00  -7.405 1.37e-13 ***
-# meth.change    6.203e-02  1.142e-02   5.434 5.58e-08 ***
-# type           7.337e-01  9.591e-02   7.650 2.09e-14 ***
-# EnsRegScore    1.452e+01  1.074e+00  13.520  < 2e-16 ***
-# in_eQTRTRUE   -1.304e+00  5.737e-01  -2.273   0.0231 *  
-# abs(tss_dist) -4.914e-06  1.160e-06  -4.237 2.28e-05 ***
-# ---
-# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-# 
-# Residual standard error: 27.83 on 21189 degrees of freedom
-#   (54 observations deleted due to missingness)
-# Multiple R-squared:  0.728,	Adjusted R-squared:  0.7279 
-# F-statistic:  7090 on 8 and 21189 DF,  p-value: < 2.2e-16
-
-res[,n_cpg_weight_region:=(1/sum(1/(abs(cpg_score)+1)))^(1/3.4),by=c('region_type',"gene")]
-res[region_type=="promoter",gene_score_region:=sum(cpg_score)*n_cpg_weight_region,by=c("gene")]
-res[region_type=="other",gene_score_region:=sum(abs(cpg_score))*n_cpg_weight_region,by=c("gene")]
-
-res[,gene_score_add:=sum(unique(abs(gene_score_region)),na.rm = T),by="gene"]
-
-fwrite(res,fp(out,"res_gene_score.tsv.gz"),sep="\t")
-
-
-resg<-unique(res[order(gene,region_type,pval)],by="gene")
-
-
+# 2)valid expression change prediction
+meth_scores<-melt(resg[,.SD,.SDcols=c("gene",meth_metrics)],id.vars = "gene",variable.name = "meth_metric",value.name = "score")
+meth_scores[score==Inf,score:=NA]
+meth_scores[score==-Inf,score:=NA]
+meth_scores<-meth_scores[!is.na(score)]
 res_de_cl<-fread("../singlecell/outputs/04-DEG_in_LGA/2020-09-01_pseudo_bulk_DEseq2_LgaVsCtrl_CBP1andcbp558_559_samples_excluded_regr_on_batch_and_sex_all_genes.csv")
 
-res_de_cl[is.na(padj),padj:=1]
-resg_de<-merge(resg,res_de_cl,by=c("gene"))
-resg_de[padj.y<0.05]
+res_de_cl<-res_de_cl[!is.na(padj)]
+meth_scores_de<-merge(meth_scores,res_de_cl,by=c("gene"))
+unique(meth_scores_de[padj<0.1]$gene)#120 DEGS
 
-p2<-ggplot(resg_de)+geom_boxplot(aes(x=padj.y<0.1,y=gene_score_add))
-
-p3<-ggplot(resg_de)+geom_boxplot(aes(x=padj.y<0.1,y=gene_score))
-
-p2+p3
-
-wilcox.test(resg_de[padj.y<=0.1]$gene_score_add,resg_de[padj.y>0.1]$gene_score_add)
-#p=0.0009198
-
-wilcox.test(resg_de[padj.y<=0.1]$gene_score,resg_de[padj.y>0.1]$gene_score)
-#p=0.0015
-
- 
-p4<-ggplot(unique(resg_de,by="gene"))+geom_boxplot(aes(x=padj.y<0.1,y=avg.meth.change))
-
-p5<-ggplot(unique(resg_de,by="gene"))+geom_boxplot(aes(x=padj.y<0.1,y=avg.m.log10.pval))
-
-p6<-ggplot(unique(resg_de,by="gene"))+geom_boxplot(aes(x=padj.y<0.1,y=avg.dmc_score))
-
-p2+p4+p5+p6
-
-p7<-ggplot(unique(resg_de,by="gene"))+geom_boxplot(aes(x=padj.y<0.1,y=abs(meth.change.x)))
-
-p8<-ggplot(unique(resg_de,by="gene"))+geom_boxplot(aes(x=padj.y<0.1,y=-log10(pval.x)))
-
-p9<-ggplot(unique(resg_de,by="gene"))+geom_boxplot(aes(x=padj.y<0.1,y=-log10(pval.x)*abs(meth.change.x)))
-
-p2+p7+p8+p9
-
-wilcox.test(resg_de[padj.y<=0.1]$meth.change.x,resg_de[padj.y>0.1]$meth.change.x)
-#p=0.04
-
-res_cl<-fread("outputs/model14_without_iugr/2020-09-16_res_C.L_with_GeneScore_and_permut.csv")
-res_cl_merge<-merge(res_cl,res_de_cl[,.(gene,log2FoldChange,pvalue,padj)])
-
-p11<-ggplot(unique(res_cl_merge,by="gene"))+geom_boxplot(aes(x=padj<0.1,y=GeneScore))
-
-p2<-p2+coord_cartesian(ylim = c(0,200))
-p11<-p11+coord_cartesian(ylim = c(0,200))
-p2+p11
-
-wilcox.test(unique(res_cl_merge,by="gene")[padj<=0.1]$GeneScore,unique(res_cl_merge,by="gene")[padj>0.1]$GeneScore)
-#p=0.001231
+meth_scores_de[,score_scaled:=scale(score),by="meth_metric"]
+ggplot(meth_scores_de)+
+  geom_boxplot(aes(fill=padj<0.1,y=score_scaled,x=meth_metric),outlier.shape = NA)+
+  coord_cartesian(ylim = c(-2.5,3))+
+  theme(axis.text.x = element_text(angle = 45,hjust = 1))
 
 
+meth_scores_de[,p_diff:=wilcox.test(score[padj<0.1],score[padj>=0.1])$p.value,by="meth_metric"]
 
+ggplot(unique(meth_scores_de,by="meth_metric"))+geom_col(aes(y=-log10(p_diff),x=meth_metric))+
+  theme(axis.text.x = element_text(angle = 45,hjust = 1))
+
+meth_scores_de[,degs:=padj<0.1]
+meth_scores_de[,q75_dt:=quantile(score_scaled[padj<0.1],0.75,na.rm=T)-quantile(score_scaled[padj>=0.1],0.75,na.rm=T),by=.(meth_metric)]
+
+ggplot(unique(meth_scores_de,by=c("meth_metric")))+
+  geom_col(aes(y=q75_dt,x=meth_metric))+
+    theme(axis.text.x = element_text(angle = 45,hjust = 1))
+
+
+meth_metrics<-c("mlog10.pval.max","avg.mlog10.pval","meth.change.max","avg.meth.change","gene_score","gene_score_add")
+
+res_anno[,meth.change.max:=max(meth.change),by=c("gene")]
+res_anno[,avg.meth.change:=mean(meth.change),by=c("gene")]
+res_anno[,mlog10.pval.max:=max(-log10(pval)),by=c("gene")]
+res_anno[,avg.mlog10.pval:=mean(-log10(pval)),by=c("gene")]
+resg<-unique(res_anno[order(gene,pval)],by=c("gene"))
+meth_scores2<-melt(resg[,.SD,.SDcols=c("gene",meth_metrics)],id.vars = "gene",variable.name = "meth_metric",value.name = "score")
+
+meth_scores_de2<-merge(meth_scores2,res_de_cl,by=c("gene"))
+meth_scores_de2[,score_scaled:=scale(score),by="meth_metric"]
+
+ggplot(meth_scores_de2)+
+  geom_boxplot(aes(fill=padj<0.1,y=score_scaled,x=meth_metric),outlier.shape = NA)+
+  coord_cartesian(ylim = c(-2.5,3))+
+  theme(axis.text.x = element_text(angle = 45,hjust = 1))
+  
+meth_scores_de2[,p_diff:=wilcox.test(score[padj<0.1],score[padj>=0.1])$p.value,by="meth_metric"]
+unique(meth_scores_de2,by="meth_metric")
+ggplot(unique(meth_scores_de2,by="meth_metric"))+geom_col(aes(y=-log10(p_diff),x=meth_metric))
+
+
+meth_metrics<-c("avg.mlog10.pval","avg.meth.change","gene_score_add")
+
+meth_scores3<-melt(resg[,.SD,.SDcols=c("gene",meth_metrics)],id.vars = "gene",variable.name = "meth_metric",value.name = "score")
+meth_scores3[meth_metric=="gene_score_add",meth_metric:="gene_score"]
+meth_scores_de3<-merge(meth_scores3,res_de_cl,by=c("gene"))
+meth_scores_de3[,score_scaled:=scale(score),by="meth_metric"]
+
+ggplot(meth_scores_de3)+
+  geom_boxplot(aes(fill=padj<0.1,y=score_scaled,x=meth_metric),outlier.shape = NA)+
+  coord_cartesian(ylim = c(-3,3))+
+  theme_classic()+
+  scale_fill_manual(values = c("white","grey"))
+  
+meth_scores_de3[,p_diff:=wilcox.test(score[padj<0.1],score[padj>=0.1])$p.value,by="meth_metric"]
+unique(meth_scores_de3,by="meth_metric")
+ggplot(unique(meth_scores_de,by="meth_metric"))+geom_col(aes(y=-log10(p_diff),x=meth_metric))
+
+#=> on voit que les degs ont un gene_score + élevé que les autres genes alors quils ont les meme pvaleurs et methchange min
+#par contre max(-log10(padj))  semble suffire pour predire gene expr change. Really ?
+#apres permut est ce tjr signif ?
+
+meth_metrics<-c("max.dmc_score","gene_score_add")
+
+
+meth_scores4<-melt(resg[,.SD,.SDcols=c("gene",meth_metrics)],id.vars = "gene",variable.name = "meth_metric",value.name = "score")
+meth_scores4[meth_metric=="max.dmc_score",meth_metric:="max(-log10(pval)*meth.change)"]
+meth_scores4[meth_metric=="gene_score_add",meth_metric:="gene_score"]
+
+meth_scores4[score==Inf,score:=NA]
+meth_scores4[score==-Inf,score:=NA]
+
+meth_scores4<-meth_scores4[!is.na(score)]
+meth_scores_de4<-merge(meth_scores4,res_de_cl,by=c("gene"))
+meth_scores_de4[,score_scaled:=scale(score),by="meth_metric"]
+
+ggplot(meth_scores_de4)+
+  geom_boxplot(aes(fill=padj<0.1,y=score_scaled,x=meth_metric),outlier.shape = NA)+
+  coord_cartesian(ylim = c(-3,3))+
+  theme_classic()+
+  scale_fill_manual(values = c("white","grey"))
+  
+meth_scores_de4[,p_diff:=wilcox.test(score[padj<0.1],score[padj>=0.1])$p.value,by="meth_metric"]
+    
+meth_scores_de4[,q75_dt:=quantile(score_scaled[padj<0.1],0.75,na.rm=T)-quantile(score_scaled[padj>=0.1],0.75,na.rm=T),by=.(meth_metric)]
+
+res_pred<-unique(meth_scores_de4,by="meth_metric")
+
+
+res_pred<-res_pred[,.(meth_metric,p_diff,)]
+
+pvals_perms<-sapply(1:100, function(i){
+  print(i)
+
+  mtd_p<-copy(mtd_f)
+  mtd_p[,group:=sample(group)]
+  print(paste(sum(mtd_p$group==mtd_f$group),"matchs/",nrow(mtd_f)))
+  mtd_p[,group_sex:=paste(group,sex,sep="_")]
+  design<-model.matrix(formule,data = data.frame(mtd_p,row.names = "sample"))
+  fit <- lmFit(data.frame(methf,row.names = "cpg_id")[,mtd_p$sample], design)
+  cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
+                             levels=design)
+
+  fit2  <- contrasts.fit(fit, cont.matrix)
+  fit2  <- eBayes(fit2)
+  resp<-data.table(topTable(fit2,coef = "C.L",n = Inf),keep.rownames = "cpg_id")
+  resp[,cpg_id:=as.numeric(cpg_id)]
+  setnames(resp,c("P.Value","adj.P.Val","AveExpr","logFC"),c("pval","padj","avg.meth","meth.change"))
+  print(table(resp[padj<0.01]$meth.change>0))
+  resp<-merge(resp,cpgs_score,by="cpg_id")
+
+  resp[,max.dmc_score:=max(-log10(pval[which(in_eQTR==F)])*abs(meth.change[which(in_eQTR==F)]),na.rm = T),by=c("gene")]
+  resp[,cpg_score:=-log10(pval)*meth.change*links_weight*regul_weight]
+  resp[,region_type:=ifelse(abs(tss_dist)<=2000,"promoter","other")]
+  resp[is.na(tss_dist),region_type:="other"]
+
+  resp[,n_cpg_weight_region:=(1/sum(1/(abs(cpg_score)+1)))^(1/3.9),by=c('region_type',"gene")]
+  resp[region_type=="promoter",gene_score_region:=sum(cpg_score)*n_cpg_weight_region,by=c("gene")]
+  resp[region_type=="other",gene_score_region:=sum(abs(cpg_score))*n_cpg_weight_region,by=c("gene")]
+  resp[,gene_score:=sum(unique(abs(gene_score_region)),na.rm = T),by="gene"]
+
+  meth_metrics<-c("max.dmc_score","gene_score")
+  resgp<-unique(resp[order(gene,pval)],by=c("gene"))
+
+  meth_scores4p<-melt(resgp[,.SD,.SDcols=c("gene",meth_metrics)],id.vars = "gene",variable.name = "meth_metric",value.name = "score")
+  meth_scores4p[score==Inf,score:=NA]
+  meth_scores4p[score==-Inf,score:=NA]
+  meth_scores4p<-meth_scores4p[!is.na(score)]
+  meth_scores_de4p<-merge(meth_scores4p,res_de_cl,by=c("gene"))
+  meth_scores_de4p[,score_scaled:=scale(score),by="meth_metric"]
+  meth_scores_de4p[,p_diff:=wilcox.test(score[padj<0.1],score[padj>=0.1])$p.value,by="meth_metric"]
+  meth_scores_de4p[,q75_dt:=quantile(score_scaled[padj<0.1],0.75,na.rm=T)-quantile(score_scaled[padj>=0.1],0.75,na.rm=T),by=.(meth_metric)]
+  res_predp<-unique(meth_scores_de4p,by="meth_metric")
+
+  return(list(p_diff=res_predp$p_diff,
+              q75_dt=res_predp$q75_dt))
+
+  })
+pvals_perms
+p_perm<-Reduce(rbind,pvals_perms[1,])
+q_perm<-Reduce(rbind,pvals_perms[2,])
+
+# max(dmc_score)
+sum(p_perm[,1]<0.00192)/100 #p_perm p = 0.48
+sum(q_perm[,1]>0.448)/100 #p_perm q75 = 0.1
+
+
+# gene_score
+sum(p_perm[,2]<0.0007759)/100 #p_perm p = 0.19
+sum(q_perm[,2]>0.5135)/100 #p_perm q75 = 0.03
+
+#save res_by_gene
+res_anno[,n.cpg.in.eQTR:=sum(in_eQTR),by="gene"]
+res_anno[,gene_score_prom:=gene_score_region[region_type=="promoter"][1],by="gene"]
+res_anno[,gene_score_enh:=gene_score_region[region_type=="other"][1],by="gene"]
+
+resg<-unique(res_anno[order(gene,pval)],by=c("gene"))
+fwrite(resg[,.(gene,tss_pos,gene_score_add,gene_score_prom,gene_score_enh,n.cpg.gene,n.cpg.sig.gene,n.cpg.in.eQTR,cpg_id,tss_dist,pval,padj,meth.change)],fp(out,"res_genes.csv.gz"))
+resg[,gene_score_add_scaled:=scale(gene_score_add)]
+#plot dmgs plot
+ggplot(resg,aes(x=gene_score_add,y=-log10(pval)))+
+  geom_point()+
+  theme_bw()
+
+ggplot(resg,aes(x=gene_score_add,y=-log10(pval),col=padj<0.1&gene_score_add>300))+
+  geom_point()+
+  scale_color_manual(values = c("grey","red"))+theme_minimal()+
+  geom_label_repel(aes(label = ifelse(gene_score_add>1500&padj<0.05,gene,"")),
+                   max.overlaps = 3000,
+                   box.padding   = 0.35, 
+                   point.padding = 0.5,
+                   segment.color = 'grey50')
+
+
+#NEXT, PAthway analysis, see 03-

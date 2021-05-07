@@ -77,6 +77,7 @@ methf<-methf[!(pct.zero>0.7&n.methyl.not.zero==0)]
 methf #754931 CpGs after filtering
 
 fwrite(methf,"datasets/cd34/meth_data_filtered.csv.gz")
+methf<-fread("datasets/cd34/meth_data_filtered.csv.gz")
 
 
 #FOCUS ON CTRL LGA
@@ -192,6 +193,8 @@ vars_to_include<-c("batch","mat.age","group_complexity_fac","group_sex","latino"
 # exclude samples without all necessary clinical infos
 mtd_f<-pc_mtd[,to_keep:=rowSums(is.na(.SD))==0,.SDcols=vars_to_include][to_keep==T]
 fwrite(mtd_f,"datasets/cd34/metadata_cl_pcs_040521.csv")
+mtd_f<-fread("datasets/cd34/metadata_cl_pcs_040521.csv")
+
 table(mtd_f$group,mtd_f$sex)
 formule<- ~0 + group_sex   + batch+ group_complexity_fac +mat.age  + latino + PC2
 
@@ -202,7 +205,6 @@ fit <- lmFit(data.frame(methf,row.names = "cpg_id")[,mtd_f$sample], design)
 cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
                              levels=design)
 
-
 fit2  <- contrasts.fit(fit, cont.matrix)
 fit2  <- eBayes(fit2)
 
@@ -212,10 +214,11 @@ res[adj.P.Val<=0.1&abs(logFC)>25] #1255 cpgs
 fwrite(res,fp(out,"res_limma.tsv.gz"),sep="\t")
 res<-fread(fp(out,"res_limma.tsv.gz"),sep="\t")
 
-p<-ggplot(res)+
-  geom_point(aes(x=logFC,y=-log10(P.Value),col=adj.P.Val<0.1&abs(logFC)>25))+
-  scale_color_manual(values = c("grey","red"))
-ggsave(fp(out,"volcano_plot.png"),plot=p,height=5,width=7)
+ggplot(res)+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=adj.P.Val<0.1&abs(logFC)>25),size=0.1)+
+  scale_color_manual(values = c("grey","red"))+theme_minimal()
+ggsave(fp(out,"volcano_plot.png"))
+
 
 #DMR
 #run 01B
@@ -242,13 +245,68 @@ res_batch<-Reduce(rbind,lapply(1:2,function(b){
 }))
 
 fwrite(res_batch,fp(out,"res_limma_cohorts.tsv.gz"),sep="\t")
+res_batch<-fread(fp(out,"res_limma_cohorts.tsv.gz"),sep="\t")
+res_batch<-res_batch[compa=="C.L"]
 table(res_batch[adj.P.Val<=0.1,.(compa,batch)])
-p<-ggplot(res_batch)+
-  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<10^-3&abs(logFC)>25),size=0.1)+
-  facet_grid(batch~compa)+
-  scale_color_manual(values = c("grey","red"))
-ggsave(fp(out,"volcanos_limma_cohorts.png"),p,width = 12,height = 5)
+ggplot(res_batch)+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<0.001&abs(logFC)>25),size=0.1)+
+  facet_wrap("batch")+
+  scale_color_manual(values = c("grey","red"))+
+  theme_minimal()
+ggsave(fp(out,"fig1A.volcanos_limma_cohorts_C.L.png"),width = 12,height = 5)
 
+#interesection
+install.packages("VennDiagram")
+library(VennDiagram)
+# Fonction d'aide pour afficher le diagramme de Venn
+display_venn <- function(x, ...){
+  require(VennDiagram)
+  grid.newpage()
+  venn_object <- venn.diagram(x, filename = NULL, ...)
+  grid.draw(venn_object)
+}
+display_venn(list(batch1=res_batch[batch==1&P.Value<0.001&abs(logFC)>25]$cpg_id,
+                  batch2=res_batch[batch==2&P.Value<0.001&abs(logFC)>25]$cpg_id
+                  )) #only 12/2200 in common..
 
+inter<-intersect(res_batch[batch==1&P.Value<0.001&abs(logFC)>25]$cpg_id,
+                 res_batch[batch==2&P.Value<0.001&abs(logFC)>25]$cpg_id)
+summary(res_batch[cpg_id%in%inter]$adj.P.Val)
+summary(res_batch[P.Value<0.001&abs(logFC)>25]$adj.P.Val) #et mm pas particulirement signif
 
+over_repr_test_simple(set1 =res_batch[batch==1&P.Value<0.001&abs(logFC)>25]$cpg_id ,
+                      set2 = res_batch[batch==2&P.Value<0.001&abs(logFC)>25]$cpg_id,
+                      size_universe = length(unique(res_batch$cpg_id))) #0.04
 
+#inter au niveau du gene ?
+cpgs_annot<-fread("outputs/02A-CpGs_annotations/cpgs_closest_gene_tss_linked_within_200kb_around.tsv")
+res_b<-merge(res_batch,cpgs_annot)
+
+display_venn(list(batch1=unique(res_b[batch==1&P.Value<0.001&abs(logFC)>25]$gene),
+                  batch2=unique(res_b[batch==2&P.Value<0.001&abs(logFC)>25]$gene)
+                  )) #197/1222
+
+over_repr_test_simple(set1 =res_b[batch==1&P.Value<0.001&abs(logFC)>25]$gene ,
+                      set2 = res_b[batch==2&P.Value<0.001&abs(logFC)>25]$gene,
+                      size_universe = length(unique(res_b$gene))) #5.933862e-26
+
+#+++ inter au niveau du gene mais pas au niveau du cpg, due a ++ cpg lié à ces gene ?
+res_perm<-res_b[batch==1,.(cpg_id,gene)]
+ps<-sapply(1:100, function(i){
+  set.seed(i)
+  return(over_repr_test_simple(res_perm[cpg_id%in%sample(cpg_id,2200)]$gene,
+                      res_perm[cpg_id%in%sample(cpg_id,2200)]$gene,
+                      size_universe = length(unique(res_perm$gene))))
+  }
+  )
+  
+summary(ps)
+set.seed(123)
+res_perm[cpg_id%in%sample(cpg_id,2200)]$gene
+res_perm[cpg_id%in%sample(cpg_id,2200)]$gene
+
+display_venn(list(batch1=unique(res_perm[cpg_id%in%sample(cpg_id,2200)]$gene),
+                  batch2=unique(res_perm[cpg_id%in%sample(cpg_id,2200)]$gene)
+                  )) #374/1590
+
+#=> intersection pas signif

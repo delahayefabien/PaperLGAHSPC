@@ -1,10 +1,6 @@
 #02A1-create_eQTR
-#2020-05-30
-#config et library
-options(stringsAsFactors=F)
-set.seed(12345)
-#library(limma)
-library(data.table)
+
+source("scripts/utils/new_utils.R")
 out<-"outputs/02A1-create_eQTR"
 dir.create(out)
 #I) with whole_blood eQTL
@@ -30,7 +26,7 @@ translator
 
 
 eqtls_wb<-merge(eqtls_wb,translator,all.x=T,by="variant_id")
-
+rm(translator)
 
 eqtls_wb[,chr.hg19:=paste0("chr",str_extract(variant_id_b37,"^[0-9XY]{1,2}"))]
 
@@ -54,7 +50,7 @@ summary(eqtls_wb$dist_to_next)
 
 # 1) find min.local, i.e eqtl with pval in top25% of eQTL of the gene, and first eQTL at +/-5kb
 
-eqtls_wb[,minLocal.cand:=pval_nominal<quantile(pval_nominal,0.25),by=c("gene_id")]
+eqtls_wb[,minLocal.cand:=pval_nominal<=quantile(pval_nominal,0.25),by=c("gene_id")]
 
 is.minLocal<-function(dists,pvals){
   isMins<-sapply(1:length(dists), function(i){
@@ -70,13 +66,13 @@ is.minLocal<-function(dists,pvals){
   return(isMins)
 }
 
-eqtls_wb[minLocal.cand==T,minLocal:=is.minLocal(tss_distance,pval_nominal),by=c("gene_id")]
-eqtls_wb[minLocal==T] #158904 min local
+eqtls_wb[minLocal.cand==T,minLocal:=is.minLocal(pos,pval_nominal),by=c("gene_id")]
+eqtls_wb[minLocal==T] #189470 min local
 
 eqtls_wb[,n.local.gene:=sum(minLocal,na.rm = T),by="gene_id"]
 summary(unique(eqtls_wb,by="gene_id")$n.local.gene)
-  # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-  #  0.00    2.00    6.00   12.86   15.00  320.00 
+   # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+   # 1.00    3.00    8.00   15.33   18.00  966.00 
 
 
 # 2) find eQTR, i.e regions at +/-500pb around min local iteractively expanded if eQTLs at +/-2000pb and log10(pval) difference < 4
@@ -161,8 +157,9 @@ findeQTR<-function(minLocal,pvals,dists,seed=2000,log10.pval.dt.thr=4,length.max
 }
 
 #cluster snps by region
-eqtls_wb[,eQTR:=findeQTR(minLocal,pval_nominal,tss_distance,seed = 2000,log10.pval.dt.thr = 4,length.max=10000,length.min = 1000),by="gene_id"]
+eqtls_wb[,eQTR:=findeQTR(minLocal,pval_nominal,pos,seed = 2000,log10.pval.dt.thr = 4,length.max=10000,length.min = 1000),by="gene_id"]
 eqtls_wb[!is.na(eQTR)] #1.2M / 2.4M eQTL on eQTR
+
 
 eqtls_wb[!is.na(eQTR),start.eQTR:=min(pos),by=.(gene_id,eQTR)]
 eqtls_wb[!is.na(eQTR),end.eQTR:=max(pos),by=.(gene_id,eQTR)]
@@ -180,14 +177,11 @@ eqtls_wb[n.eQTL==1,end.eQTR:=end.eQTR+500]
 
 
 #translate gene_id in gene symbol
-trans<-TransEnsemblVerstoSymbol(unique(eqtls_wb$gene_id))
-trans<-trans[,gene_id:=ensembl_gene_id_version][,gene:=hgnc_symbol][,-c("ensembl_gene_id_version","hgnc_symbol")]
+trans<-fread("ref/eQTL/GTEx_Analysis_v8_eQTL/Whole_Blood.v8.egenes.txt.gz",select = 1:2,col.names = c("gene_id","gene"))
 trans[gene=="",gene:=NA]
 eqtls_wb<-merge(eqtls_wb,trans,by="gene_id")
-unique(eqtls_wb,by="gene_id")[is.na(gene)]#1261/3179
+unique(eqtls_wb,by="gene_id")[is.na(gene)]#0/3179
 
-trans2<-TransEnsembltoSymbol(str_extract(unique(eqtls_wb$gene_id),"ENSG[0-9]+"))
-trans2[hgnc_symbol==""] #1261 too
 
 #summary :
 #eqtr by gene
@@ -195,23 +189,34 @@ eqtls_wb[,n.eqtr.gene:=length(unique(na.omit(eQTR))),by="gene_id"]
 
 summary(unique(eqtls_wb,by='gene_id')$n.eqtr.gene)
   # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-  # 0.000   2.000   5.000   8.894  11.000 178.000 
+  # 0.000   2.000   6.000   9.718  12.000 191.000 
 
-eqtls_wb[n.eqtr.gene==178] # ENSG00000281831.1 , https://www.genecards.org/cgi-bin/carddisp.pl?gene=HCP5B
-#lncrna gene
+eqtls_wb[n.eqtr.gene==191] # ZFP57 Transcription regulator required to maintain maternal and paternal gene imprinting
 
-eqtls_wb[n.eqtr.gene==0] #936 eQTL so negligeable
+eqtls_wb[n.eqtr.gene==0] #69 eQTL so negligeable
 
-fwrite(eqtls_wb,fp(out,"eqtls_wb_with_eQTR.csv.gz"))
-
-#eQTR_id for eQTR link to gene symbol and save in a bed files :
-eqtls_wb[!is.na(gene),eqtr_id:=paste(gene,eQTR,sep="-")]
+#save useful info before reduce df to eQTR level
 eqtls_wb[minLocal==T,pos.min.local:=pos]
 eqtls_wb[,tss_dist:=tss_distance]
 eqtls_wb[,pval_link:=pval_nominal]
-eqtrs_symbol<-unique(eqtls_wb[!is.na(eQTR)&!is.na(gene)&minLocal==T][order(gene,eQTR,abs(tss_dist))][,.(chr,start.eQTR,end.eQTR,eqtr_id,pos.min.local,pval_link,tss_dist,gene)])
-eqtrs_symbol#27k eqtr
-unique(eqtrs_symbol,by="gene") #1800 genes
+eqtls_wb[minLocal==T,avg.mlog10pval:=mean(-log10(pval_link)),by=c("gene_id","eQTR")]
+eqtls_wb[!is.na(gene),eqtr_id:=paste(gene,eQTR,sep="-")]
+summary(unique(eqtls_wb[minLocal==T],by=c("eqtr_id"))$avg.mlog10pval)
+  #   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  # 3.255   6.810  11.308  18.710  21.265 277.112 
+
+eqtls_wb[,length.eqtr:=end.eQTR-start.eQTR]
+summary(unique(eqtls_wb[minLocal==T],by=c("eqtr_id"))$length.eqtr)
+ # Min. 1st Qu.  Median    Mean 3rd Qu.    Max.    NA's 
+ #      0    1000    3172    4045    6146   13955     416 
+
+fwrite(eqtls_wb,fp(out,"eqtls_wb_with_eQTR.csv.gz"))
+eqtls_wb<-fread(fp(out,"eqtls_wb_with_eQTR.csv.gz"))
+
+#and save eQTR in a bed files :
+eqtrs_symbol<-unique(eqtls_wb[!is.na(eQTR)&!is.na(gene)&minLocal==T][order(gene,eQTR,abs(tss_dist))][,.(chr,start.eQTR,end.eQTR,eqtr_id,pos.min.local,pval_link,avg.mlog10pval,tss_dist,gene)])
+eqtrs_symbol#183k eqtr
+unique(eqtrs_symbol,by="gene") #12348 genes
 fwrite(eqtrs_symbol,fp(out,"whole_blood_eQTR_symbol.bed"),sep = "\t")
 
 
@@ -237,19 +242,19 @@ summary(eqtls_meta$dist_to_next)
 
 # 1) find min.local, i.e eqtl with pval in top25% of eQTL of the gene, and first eQTL at +/-5kb
 
-eqtls_meta[,minLocal.cand:=PVALUE_FE<quantile(PVALUE_FE,0.25),by=c("gene")]
+eqtls_meta[,minLocal.cand:=PVALUE_FE<=quantile(PVALUE_FE,0.25),by=c("gene")]
 
-eqtls_meta[minLocal.cand==T,minLocal:=is.minLocal(tss_dist,PVALUE_FE),by=c("gene")]
-eqtls_meta[minLocal==T] #78488 min local
+eqtls_meta[minLocal.cand==T,minLocal:=is.minLocal(pos,PVALUE_FE),by=c("gene")]
+eqtls_meta[minLocal==T] #98k min local
 
 eqtls_meta[,n.local.gene:=sum(minLocal,na.rm = T),by="gene"]
 summary(unique(eqtls_meta,by="gene")$n.local.gene)
    # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-   # 0.00    1.00    3.00   14.94   11.00 1638.00 
+   # 1.00    2.00    5.00   18.71   15.00 1683.00 
 
 #cluster snps by region
-eqtls_meta[,eQTR:=findeQTR(minLocal,PVALUE_FE,tss_dist,seed = 2000,log10.pval.dt.thr = 4,length.max=10000,length.min = 1000),by="gene"]
-eqtls_meta[!is.na(eQTR)] #300k / 720k eQTL on eQTR
+eqtls_meta[,eQTR:=findeQTR(minLocal,PVALUE_FE,pos,seed = 2000,log10.pval.dt.thr = 4,length.max=10000,length.min = 1000),by="gene"]
+eqtls_meta[!is.na(eQTR)] #320k / 720k eQTL on eQTR
 
 eqtls_meta[!is.na(eQTR),start.eQTR:=min(pos),by=.(gene,eQTR)]
 eqtls_meta[!is.na(eQTR),end.eQTR:=max(pos),by=.(gene,eQTR)]
@@ -269,22 +274,34 @@ eqtls_meta[n.eQTL==1,end.eQTR:=end.eQTR+500]
 eqtls_meta[,n.eqtr.gene:=length(unique(na.omit(eQTR))),by="gene"]
 
 summary(unique(eqtls_meta,by='gene')$n.eqtr.gene)
-  # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
-  # 0.000   1.000   2.000   6.156   6.000 166.000 
+   # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+   # 1.00    1.00    3.00    7.08    7.00  166.00 
 
 eqtls_meta[n.eqtr.gene==166] # LY6G5B, gene du CMH III, https://www.genecards.org/cgi-bin/carddisp.pl?gene=LY6G5B
 
-eqtls_meta[n.eqtr.gene==0] #7684 eQTL so negligeable
+
+#eQTR_id for eQTR link to gene symbol 
+eqtls_meta[minLocal==T,pos.min.local:=pos]
+eqtls_meta[,pval_link:=PVALUE_FE]
+
+eqtls_meta[minLocal==T,avg.mlog10pval:=mean(-log10(pval_link)),by=c("gene","eQTR")]
+eqtls_meta[!is.na(gene),eqtr_id:=paste(gene,eQTR,sep="-")]
+summary(eqtls_meta[minLocal==T]$avg.mlog10pval)
+   Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  29.00   45.80   62.33   70.31   88.81  191.19 
+
+eqtls_meta[,length.eqtr:=end.eQTR-start.eQTR]
+summary(unique(eqtls_meta[minLocal==T])$length.eqtr)
+   # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+   #    0     299    1110    2362    3457   13833 
 
 fwrite(eqtls_meta,fp(out,"eqtls_meta_with_eQTR.csv.gz"))
 
-#eQTR_id for eQTR link to gene symbol and save in a bed files :
-eqtls_meta[!is.na(gene),eqtr_id:=paste(gene,eQTR,sep="-")]
-eqtls_meta[minLocal==T,pos.min.local:=pos]
-eqtls_meta[,pval_link:=PVALUE_FE]
-eqtrs_symbol<-unique(eqtls_meta[!is.na(eQTR)&!is.na(gene)&minLocal==T][order(gene,eQTR,abs(tss_dist))][,.(chr,start.eQTR,end.eQTR,eqtr_id,pos.min.local,pval_link,tss_dist,gene)])
-eqtrs_symbol#38k eqtr
-unique(eqtrs_symbol,by="gene") #4100 genes
+#and save in a bed files :
+
+eqtrs_symbol<-unique(eqtls_meta[!is.na(eQTR)&!is.na(gene)&minLocal==T][order(gene,eQTR,abs(tss_dist))][,.(chr,start.eQTR,end.eQTR,eqtr_id,pos.min.local,pval_link,avg.mlog10pval,tss_dist,gene)])
+eqtrs_symbol#46k eqtr
+unique(eqtrs_symbol,by="gene") #5254 genes
 fwrite(eqtrs_symbol,fp(out,"tissue_wide_eQTR_symbol.bed"),sep = "\t")
 
 

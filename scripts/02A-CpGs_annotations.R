@@ -51,6 +51,7 @@ cpgs_genes_1
 rm(cpgs_genes_tss)
 
 fwrite(cpgs_genes_1,fp(out,"cpgs_closest_gene_tss_linked_within_200kb_around.tsv"),sep="\t")
+cpgs_genes_1<-fread(fp(out,"cpgs_closest_gene_tss_linked_within_200kb_around.tsv"),sep="\t")
 
 #by presence in eQTL region
 #need first create eQTR
@@ -60,34 +61,43 @@ eqtrs[,eqtr_id:=paste(eqtr_id,tissue,sep="-")]
 eqtrs<-unique(eqtrs[!is.na(start.eQTR)],by="eqtr_id")
 table(eqtrs$tissue)
 # tissue_wide whole_blood 
-#       32271       17817 
+#       37112      118529 
 
 table(unique(eqtrs,by=c("gene","tissue"))$tissue)
 # tissue_wide whole_blood 
-#        4137        1777 
+#        5254       12342 
 
 
 cpgs_eQTR<-bed_inter(a=cpgs[,start:=pos][,end:=pos+1][,.(chr,start,end,cpg_id)][order(chr,start)],
           b=eqtrs[,start:=start.eQTR][,end:=end.eQTR][,.(chr,start,end,eqtr_id)][order(chr,start)],
           select = c(4,8),col.names = c("cpg_id","eqtr_id"))
 
-cpgs_eQTR #387k  cpgs - eQTR match
-cpgs_eQTR<-merge(cpgs_eQTR,unique(eqtrs[,.(eqtr_id,gene,tissue)]),all.x=T)
-unique(cpgs_eQTR,by="cpg_id")#220368k cpgs linked to a gene
-unique(cpgs_eQTR,by="gene")#4k genes linked to a cpg
+cpgs_eQTR #549k  cpgs - eQTR match
+cpgs_eQTR<-merge(cpgs_eQTR,unique(eqtrs[,.(eqtr_id,gene,tissue,avg.mlog10pval)]),all.x=T)
+unique(cpgs_eQTR,by="cpg_id")#322155 cpgs linked to a gene
+unique(cpgs_eQTR,by="gene")#12k genes linked to a cpg
 cpgs_eQTR[,in_eQTR:=T]
 cpgs_eQTR[,in_both_eQTR:=all(c("whole_blood","tissue_wide")%in%tissue),by=.(cpg_id,gene)]
-unique(cpgs_eQTR[in_both_eQTR==T],by="cpg_id") #(only) 1318 cpg in both tissue
-unique(cpgs_eQTR[in_both_eQTR==T],by="gene") #in (only) 86 genes
-cpgs_eQTR<-unique(cpgs_eQTR[,-c("tissue","eqtr_id")])
+unique(cpgs_eQTR[in_both_eQTR==T],by="cpg_id") #(only) 4k cpg in both tissue
+unique(cpgs_eQTR[in_both_eQTR==T],by="gene") #in (only) 406 genes
+cpgs_eQTR<-unique(cpgs_eQTR)
+
+#merge with coord
+cpgs_eQTR<-merge(cpgs_eQTR,cpgs[,.(cpg_id,chr,pos)],by="cpg_id")
+#add tss dist
+  #need strand
+gene_strands<-fread("ref/eQTL/GTEx_Analysis_v8_eQTL/Whole_Blood.v8.egenes.txt.gz",select = c(2,4:6),col.names = c("gene","start","end","strand"))
+gene_strands[strand=="+",tss_pos:=start]
+gene_strands[strand=="-",tss_pos:=end]
+cpgs_eQTR<-merge(cpgs_eQTR,gene_strands[,.(gene,tss_pos,strand)],,by="gene",all.x = T)
+cpgs_eQTR[strand=="+",tss_dist:=pos-tss_pos][strand=="-",tss_dist:=tss_pos-pos]
+
 
 #merge the 2 links
 cpgs_genes_1[,in_eQTR:=F]
-cpgs_genes<-merge(cpgs_genes_1[,.(cpg_id,gene,in_eQTR,tss_dist)],cpgs_eQTR,all=T)
+cpgs_genes_1[,in_both_eQTR:=F]
+cpgs_genes<-rbind(cpgs_genes_1[,-c("n.gene.cpg","closest.rank")],cpgs_eQTR,fill=T)
 cpgs_genes[in_eQTR==T]
-
-#merge with coord
-cpgs_genes<-merge(cpgs[,.(cpg_id,chr,pos)],cpgs_genes,all.x = T,by="cpg_id")
 
 fwrite(cpgs_genes,fp(out,"all_cpgs_gene_links.csv.gz"))
 
@@ -112,10 +122,11 @@ cpgs_chrine<-bed_inter(a=unique(cpgs,by="cpg_id")[,start:=pos][,end:=pos+1][,.(c
 cpgs_reg<-merge(cpgs_chrine,cpgs_ensembl,all.x=T,by="cpg_id")
 
 fwrite(cpgs_reg,fp(out,"cpgs_annot_ensembl_regulatory_domain_and_chromHMM_chromatin_features.csv.gz"))
+cpgs_reg<-fread(fp(out,"cpgs_annot_ensembl_regulatory_domain_and_chromHMM_chromatin_features.csv.gz"))
 
 cpgs_anno<-merge(cpgs_reg,cpgs_genes,all=T,by="cpg_id")
 
-fwrite(unique(cpgs_anno[order(cpg_id,gene)][,.(cpg_id,chr,pos,in_eQTR,tss_dist,gene,chromatin_feature,ensembl_regulatory_domain)]),
+fwrite(unique(cpgs_anno[order(cpg_id,gene)][,.(cpg_id,chr,pos,gene,tss_pos,tss_dist,in_eQTR,eqtr_id,tissue,avg.mlog10pval,in_both_eQTR,strand,chromatin_feature,ensembl_regulatory_domain)]),
        fp(out,"cpgs_annot.csv.gz"))
 
 
