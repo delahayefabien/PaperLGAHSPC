@@ -60,7 +60,7 @@ res_gsea_go<- gseGO(geneList     = rank(gene_scores),
                         pvalueCutoff = 0.001,
                         eps = 0,
                         OrgDb = org.Hs.eg.db)
-nrow(as.data.frame(res_gsea_go))#685
+nrow(as.data.frame(res_gsea_go))#699
 
 dotplot(res_gsea_go,showCategory=20)
 gsea_go<-data.table(as.data.frame(res_gsea_go))
@@ -74,11 +74,14 @@ dotplot(res_gsea_go,x=gsea_go[order(p.adjust)]$gene_score.avg[1:40],showCategory
 emapplot(pairwise_termsim(res_gsea_go,showCategory = 40),showCategory = 40)
 
 #GSE GWAS
+
 source("scripts/utils/new_utils.R")
 library(clusterProfiler)
 library(enrichplot)
-resg<-fread("outputs/02-genescore_calculation_and_validation/res_genes.csv.gz")
-gwas_genes<-fread("ref/gwas/list_ref_GWAS_042721.csv",
+out<-"outputs/03-pathway_analysis"
+
+resg<-fread("outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
+gwas_genes<-fread("../methyl/ref/gwas/list_ref_GWAS_042721.csv",
                   select = c(2,3,4),
                   col.names = c("reported_gene","mapped_genes","disease_trait"),
                   skip = 1)
@@ -96,6 +99,9 @@ summary(unique(gwas_genes_rep[,.(disease_trait,n.gene.trait)])$n.gene.trait)
 # remove traits if < 10 genes 
 gwas_genes_rep10<-gwas_genes_rep[n.gene.trait>=10]
 gwas_genes_rep10 #81k gene-trait associations
+fwrite(gwas_genes_rep10,"../methyl/ref/gwas/reported_gene_traits_GWAS_10genes.csv")
+gwas_genes_rep10<-fread("../methyl/ref/gwas/reported_gene_traits_GWAS_10genes.csv")
+
 length(unique(gwas_genes_rep10$disease_trait)) #1299 disease traits
 gwas_genes_rep10[,n.gene.trait:=.N,by="disease_trait"]
 summary(unique(gwas_genes_rep10[,.(disease_trait,n.gene.trait)])$n.gene.trait)
@@ -106,23 +112,21 @@ gene_scores<-resg$gene_score_add
 names(gene_scores)<-resg$gene
 gene_scores<-sort(gene_scores,decreasing = T)
 
-# GSEA
-?GSEA
 res_gsea_gwas<-GSEA(geneList = rank(gene_scores),
                     TERM2GENE = gwas_genes_rep10[,.(disease_trait,reported_gene)],
                     maxGSSize    = 500,
                     eps = 0,
                     pvalueCutoff = 0.01
                     )
-nrow(as.data.frame(res_gsea_gwas))#83/1300
+nrow(as.data.frame(res_gsea_gwas))#86/1300
 dotplot(res_gsea_gwas,showCategory=20)
-emapplot(pairwise_termsim(res_gsea_gwas,showCategory = 83),showCategory = 83)
+emapplot(pairwise_termsim(res_gsea_gwas,showCategory = 86),showCategory = 86)
 
 gsea_gwas<-data.table(as.data.frame(res_gsea_gwas))
 gsea_gwas[,gene_score.avg:=mean(resg$gene_score_add[resg$gene %in% tr(core_enrichment,tradEntrezInSymbol = F)],na.rm=T),.(ID)]
 
 saveRDS(res_gsea_gwas,fp(out,"res_gsea_gwas.rds"))
-fwrite(gsea_gwas[order(p.adjust)],fp(out,"res_gsea_go.csv"))
+fwrite(gsea_gwas[order(p.adjust)],fp(out,"res_gsea_gwas.csv"))
 
 
 #2) if not satisfying, with mapped gene #satisfying

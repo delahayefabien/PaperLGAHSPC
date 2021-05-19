@@ -26,7 +26,7 @@ ggplot(res[padj<=0.2&  n_dmc_with_motif>30][order(pval)])+geom_point(aes(x=motif
 
 #Some TF motif are similar to CCGG (our HELP-tagging enzymes cleaving site) 
 #so perform also autobckgroun to see if enrichment in such TF
-#run 03B2 #[to do maybe]
+#run 03B2 
 
 
 

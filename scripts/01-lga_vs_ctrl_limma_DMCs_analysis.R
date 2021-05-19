@@ -97,10 +97,12 @@ table(mtd[,.(group,sex)])
 
 #COVARIATES ANALYSIS
 # check no vars too much unique individual by levels (singleton)
+bool_vars<-c("latino","preterm","GDM","drugs","etoh", "smoking")
+categorical_vars<-c(bool_vars,"group","sex","group_sex","ethnicity","lab","batch","date","DNA.extraction","sequencing","year")
 
 lapply(mtd[,.SD,.SDcols=categorical_vars],function(x)sum(table(x)==1)) #exclude sequencing and date
 
-mtd<-mtd[,-c("sequencing","date")]
+mtd<-mtd[,-c("sequencing","date","drugs")]
 library(ggrepel)
 meth_mat<-as.matrix(data.frame(methf,row.names = "cpg_id")[,mtd$sample])
 pca<-prcomp(t(meth_mat))
@@ -135,6 +137,12 @@ r2_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:30,res = "r2",seuilP = 0.1) #batc
 meth.influencing.vars<-rownames(pval_mat)[rowSums(pval_mat<0.01)>0]
 meth.influencing.vars<-c(meth.influencing.vars,"mat.age","latino","group")
 fwrite(data.table(pval_mat,keep.rownames = "covar"),fp(out,"res_correl_covar_pcs.csv"),sep=";")
+
+mtd2<-copy(mtd)
+mtd2[,library_complexity:=group_complexity_fac]
+CorrelCovarPCs(pca =pca ,mtd2[,c("sample","batch","mat.age","group","sex",
+                                "latino","ponderal_index","weight.g","length.cm",
+                                "head_circumf.cm.","gest.age.wk","DNA.extraction","library_complexity")],rngPCs =1:10,res = "pval",seuilP = 0.1) #batch, seq depth,group_complexity,group , ethnicity
 
 # correl between covars and group
 infl.vars.fac<-meth.influencing.vars[meth.influencing.vars%in%categorical_vars]
@@ -310,3 +318,6 @@ display_venn(list(batch1=unique(res_perm[cpg_id%in%sample(cpg_id,2200)]$gene),
                   )) #374/1590
 
 #=> intersection pas signif
+
+
+

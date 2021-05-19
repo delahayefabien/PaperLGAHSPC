@@ -128,6 +128,8 @@ if (run.par)
 el <- calculate.PFN(ijw[,1:3],doPar = doPar,num.cores = n.cores,keep.track = FALSE)
 g <- graph.data.frame(el,directed = FALSE) #make the graph
 vcount(g) #6224 nodes
+fwrite(el,fp(out,"graph.csv.gz"))
+saveRDS(g,fp(out,"graph.rds"))
 
 # perform clustering
 #MCA clustering is performed to identify multiscale clustering analysis. "MEGENA.output" is the core output to be used in the down-stream analyses for summarization and plotting.
@@ -145,6 +147,18 @@ if (getDoParWorkers() > 1)
 }
 saveRDS(megena_out,fp(out,"megena_spearman_pfn_mca_outputs.rds"))
 
+summary_out <- MEGENA.ModuleSummary(megena_out,
+	mod.pvalue = module.pval,hub.pvalue = hub.pval,
+	min.size = 10,max.size = vcount(g)/2,
+	annot.table = annot.table,id.col = id.col,symbol.col = symbol.col,
+	output.sig = TRUE)
+saveRDS(summary_out,fp(out,"summary_megena_outputs.rds"))
+
+#some signif modules ?
+modules<-megena_out$module.output$modules
+modules_pval<-megena_out$module.output$module.pvalue
+modules_sig<-modules[modules_pval<0.05]
+length(modules_sig) #449
 
 #heatmap module 
 source("scripts/utils/new_utils.R")
@@ -161,49 +175,100 @@ methg0_mat<-as.matrix(dcast(methg0,sample~gene,value.var = "gene_meth_scaled"),r
     #3) caractérisations/validation des modules 
 source("scripts/utils/new_utils.R")
 out<-"../methyl/outputs/04-comethylation_analysis"
-megena_out<-readRDS(fp(out,"megena_spearman_pfn_mca_outputs.rds"))
-modules<-megena_out$module.output$modules
-modules_pval<-megena_out$module.output$module.pvalue
-head(modules)
-head(modules_pval)
-length(modules_pval)
-length(modules)
+networks<-readRDS(fp(out,"megena_spearman_pfn_mca_outputs.rds"))
 
+
+modules<-networks$module.output$modules
+modules_pval<-networks$module.output$module.pvalue
 modules_sig<-modules[modules_pval<0.05]
-length(modules_sig) #381
+modules_sig_10<-modules_sig[sapply(modules_sig,function(x)length(x)>10)]
+length(modules_sig_10) #152
 
       #a) pathway/Biological process/TF signature enrichment analysis in these modules
-#TF signature enrichment analysis
-TFsign<-read.gmt("ref/tf_signature/TRRUST_Transcription_Factors_2019.txt")
-TFsign<-data.table(TFsign)
-TFsign_list<-split(TFsign$gene,TFsign$term)
-head(TFsign_list)
-over_repr_test_multi(set_of_interest = modules_sig[[1]],sets_of_reference = )
-
+#kegg
+modules_kegg<-lapply(modules_sig_10,function(x){
   
-res_or_all<-Reduce(rbind,lapply(names(modules_sig),function(modul){
-    print(module)
-    res_or<-data.table(TF=names(TFsign_list),regulon.size=sapply(TFsign_list,length),module=modul)
-    genes_altered<-res_methg[gene_altered==T&module==modul]$gene
-    res_or[,n.genes.altered:=length(genes_altered)]
-    res_or[,n.enriched:=sum(genes_altered%in%TFsign_list[[regulon]]),by="regulon"]
-    res_or[,genes.enriched:=paste(genes_altered[genes_altered%in%TFsign_list[[regulon]]],collapse="|"),by="regulon"]
-    res_or[,pct.enriched:=n.enriched/regulon.size]
-    
-    size_universe<-length(res_methg[module==modul]$gene)
-    
-    res_or[,pval:=phyper(q=n.enriched-1, 
-                         m=n.genes.altered, 
-                         n=size_universe-n.genes.altered, 
-                         k=regulon.size, 
-                         lower.tail=FALSE),
-           by="regulon"]
-    
-    res_or[,padj:=p.adjust(pval,method = 'BH')]
-    
-    return(res_or)
+  print(length(x))
+  genes_id<-bitr(x,fromType = "SYMBOL",toType = "ENTREZID",OrgDb = org.Hs.eg.db)$ENTREZID
+  return(as.data.frame(enrichKEGG(genes_id,
+                 organism = "hsa",pvalueCutoff = 0.05)))
   })
-  )
+
+modules_kegg_dt<-Reduce(rbind,lapply(names(modules_kegg),function(mod_name)data.table(modules_kegg[[mod_name]])[,module:=mod_name][,module.size:=length(modules[[mod_name]])]))
+table(modules_kegg_dt$module)
+# c1_100  c1_11 c1_120 c1_129 c1_132 c1_168 c1_186 c1_209  c1_21  c1_22 c1_255 
+#     26      1      2      4      1      1      4      7      5      8      2 
+# c1_258  c1_27 c1_281 c1_283 c1_299 c1_311 c1_321 c1_341 c1_354 c1_373  c1_39 
+#      6      5      1      1      2      1      1      3      1      1      1 
+#   c1_4 c1_425  c1_63  c1_64  c1_66  c1_74  c1_91 
+#      1      6      1      1      2      1      6 
+
+summary(unique(modules_kegg_dt,by="module")$module.size)
+  # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+  # 11.00   12.00   18.00   57.79   25.00 1099.00 
+
+modules_kegg_dt[module=="c1_258"]
+
+modules_kegg_dt[,n.term.enriched:=.N,by="module"]
+modules_kegg_dt[,top5:=p.adjust<=sort(p.adjust)[5],by="module"]
+split(modules_kegg_dt[top5==T,.(module,Description,Count)],by="module")
+fwrite(modules_kegg_dt,fp(out,"res_kegg_on_modules_sig_10genes.csv.gz"))
+
+
+#go
+modules_go<-lapply(modules_sig_10,function(x){
+  
+  print(length(x))
+  genes_id<-bitr(x,fromType = "SYMBOL",toType = "ENTREZID",OrgDb = org.Hs.eg.db)$ENTREZID
+  return(as.data.frame(enrichGO(genes_id,
+                                OrgDb = org.Hs.eg.db,
+                                pvalueCutoff = 0.05)))
+  })
+
+modules_go_dt<-Reduce(rbind,lapply(names(modules_go),function(mod_name)data.table(modules_go[[mod_name]])[,module:=mod_name][,module.size:=length(modules[[mod_name]])]))
+table(modules_go_dt$module)
+# c1_10 c1_100  c1_11 c1_129 c1_130 c1_132 c1_140 c1_156 c1_158 c1_184 c1_209 c1_229 c1_256 
+#     14     28     12      7     22      1     16      2      7      1     13      1     16 
+# c1_258 c1_264 c1_266 c1_281 c1_283  c1_29 c1_294 c1_310 c1_311 c1_313 c1_333 c1_334 c1_342 
+#      1      8      1      2     21      4      3     17     11     17      3     30      2 
+# c1_355 c1_359 c1_368 c1_373 c1_391   c1_4 c1_425  c1_43 c1_457  c1_48  c1_63  c1_64  c1_74 
+#      9     20     14      7      1      1     12      1      1      4      8      1      6 
+#  c1_81  c1_91 
+#      4      3 
+
+modules_go_dt[,n.term.enriched:=.N,by="module"]
+modules_go_dt[Count>=5] #only 1
+
+modules_go_dt[,top5:=p.adjust<=sort(p.adjust)[5],by="module"]
+split(modules_go_dt[top5==T,.(module,Description,Count,geneID)],by="module")
+fwrite(modules_go_dt,fp(out,"res_go_on_modules_sig_10genes.csv.gz"))
+
+
+#TF
+TFsign<-read.gmt("ref/tf_signatures/TRRUST_Transcription_Factors_2019.txt")
+
+
+modules_tf<-lapply(modules_sig_10,function(x){
+  
+  print(length(x))
+  return(as.data.frame(enricher(x,TERM2GENE= TFsign,
+                               pvalueCutoff = 0.05)))
+  })
+modules_tf_dt<-Reduce(rbind,lapply(names(modules_tf)[sapply(modules_tf, function(x)ncol(x)>0)],
+                                         function(mod_name)data.table(modules_tf[[mod_name]])[,module:=mod_name][,module.size:=length(modules[[mod_name]])]))
+
+summary(unique(modules_tf_dt,by="module")$module.size)
+ # Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+ #  11.00   13.00   19.00   23.28   27.00   66.00 
+modules_tf_dt[,n.term.enriched:=.N,by="module"]
+modules_tf_dt[,top5:=p.adjust<=sort(p.adjust)[5],by="module"]
+split(modules_tf_dt[top5==T,.(module,Description,Count,geneID)],by="module")
+
+fwrite(modules_tf_dt,fp(out,"res_tf_on_modules_sig_10genes.csv.gz"))
+
+
+
+#merge the res
 
       #b) TF binding motifs analysis 
       #c) correlation avec des traits phénotypiques (Birth weight, maternal age..)
