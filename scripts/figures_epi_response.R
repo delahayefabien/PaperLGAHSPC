@@ -534,14 +534,117 @@ unique(tf_int_dt_mtsl[pvalue<0.2],by=c("regulon","lineage_hmap","hto"))[,.(regul
 
 
 #3C: regulons epigenetically affected 
+
+res_gsea<-fread("outputs/05-regulons_enrichment_genescore/res_gsea_genescore_regulons.csv.gz")
+res_gsea[,regulon:=pathway]
+
+regulons_ord<-res_gsea[padj<=sort(padj)[25]][order(padj)]$regulon
+ggplot(res_gsea[padj<=sort(padj)[25]])+geom_col(aes(x=regulon,y=-log10(padj),fill=NES))+scale_x_discrete(limits=regulons_ord)
+ggsave("outputs/figures_epi_response/figure3/3C1-barplot_gsea_regulons_genescore_top25_padj.pdf")
+
+
+regulons_ord<-res_gsea[NES>=sort(NES,decreasing = T)[20]][order(NES,decreasing = T)]$regulon
+ggplot(res_gsea[NES>=sort(NES,decreasing = T)[20]])+geom_col(aes(x=regulon,y=-log10(padj),fill=NES))+scale_x_discrete(limits=regulons_ord)
+ggsave("outputs/figures_epi_response/figure3/3C1-barplot_gsea_regulons_genescore_top20_NES.pdf")
+
+res_gseaf<-res_gsea[!str_detect(regulon,"e$")]
+regulons_ord<-res_gseaf[padj<=sort(padj)[20]][order(padj)]$regulon
+ggplot(res_gseaf[padj<=sort(padj)[20]])+geom_col(aes(x=regulon,y=-log10(padj),fill=NES))+scale_x_discrete(limits=regulons_ord)
+ggsave("outputs/figures_epi_response/figure3/3C1-barplot_gsea_regulons_hiconf_genescore_top20_padj.pdf")
+
+
+res_or<-fread("outputs/05-regulons_enrichment_genescore/res_or_genescore150_regulons.csv.gz")
+
+ggplot(res_or[padj<0.001&!str_detect(regulon,"e$")])+
+  geom_point(aes(x=regulon,y=pct.enriched,size=regulon.size,col=-log10(padj)))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 9),
+        axis.title=element_text(size=12,face="bold"))
+ggsave("outputs/figures_epi_response/figure3/3C2-dotplot_or_regulons_hiconf_genescore150_padj0.001.pdf")
+
+ggplot(res_or[order(padj)][1:20,])+
+  geom_point(aes(x=regulon,y=pct.enriched,size=regulon.size,col=-log10(padj)))+
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 9),
+        axis.title=element_text(size=12,face="bold"))
+ggsave("outputs/figures_epi_response/figure3/3C2-dotplot_or_regulons_genescore150_top20.pdf")
+
+res_orf<-res_or[!str_detect(regulon,"e$")]
+
 #=> JUN /STAT3 /EGR1 pathway activation epigenetically altered,
 #which genes exactly ?
+#3D correl degs - genescore
+res_hsc<-fread("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_HSC_de_analysis.csv")
+res_met<-fread("outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
+plot(density(res_met$gene_score_add))
+abline(v=150)
 
-#3D : genes of this pathways hypermet and downregulated in HSC 
+res_hsc_met<-merge(res_hsc,res_met,by="gene")
+res_hsc_met[gene%in%genes_to_highlight]
+
+
+ggplot(res_hsc_met[padj.x<0.2],aes(x=log2FoldChange,y=gene_score_add,col=gene_score_add>150&abs(log2FoldChange)>0.6))+geom_point()+  
+  geom_label_repel(aes(label=ifelse(gene_score_add>150&abs(log2FoldChange)>0.6&gene%in%genes_to_highlight,gene,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","blue","gold"))+
+  theme(legend.position = "bottom")
+
+
+ggsave("outputs/figures_epi_response/figure3/3C-plot_correl_lgavsctrl_hsc_activated_degs_meth_gene_score.pdf")
+
+res_hsc_met[padj.x<0.2&abs(log2FoldChange)>0.6&gene_score_add>150,deg_meth_sig:="deg_meth"]
+res_hsc_met[padj.x<0.2&abs(log2FoldChange)>0.6&gene_score_add>150&gene %in% hto_signature,deg_meth_sig:="deg_meth_hto"]
+res_hsc_met[is.na(deg_meth_sig),deg_meth_sig:="other_gene"]
+
+ggplot(res_hsc_met[padj.x<0.2],aes(x=log2FoldChange,y=gene_score_add,col=deg_meth_sig))+geom_point()+  
+  geom_label_repel(aes(label=ifelse(gene_score_add>150&abs(log2FoldChange)>0.6&gene%in%genes_to_highlight,gene,"")),max.overlaps = 3000)+
+  scale_color_manual(values = c("blue","orange","grey"))+theme_minimal()+
+  theme(legend.position = "bottom")
+ggsave("outputs/figures_epi_response/figure3/3C-plot_correl_lgavsctrl_hsc_activated_degs_meth_gene_score_hto_signature_highlight.pdf")
+
+
 
 #INFLUENCE ON DIFF/PROLIF
 #figure4 
+dir.create("outputs/figures_epi_response/figure4/")
 #4A: cell pop switch
+cbps<-readRDS("../singlecell/outputs/cbps0_8.rds")
+DimPlot(cbps,group.by = "cell_type_int",label = T)
+cbps$lineage_int<-sapply(as.character(cbps$cell_type_int),function(ct)ifelse(ct%in%c("HSC-1","HSC-2","MkP"),"HSC",
+                                                               ifelse(ct%in%c("EMP","Ba/Eo/MasP","ErP"),"Erythro-Mas",
+                                                                      ifelse(ct%in%c("GMP-1","GMP-2"),"Myeloid",
+                                                                             ifelse(ct%in%c("CLP","proB"),"Lymphoid",ct)))))
+DimPlot(cbps,group.by = "lineage_int",label = T)
+
+mtd<-data.table(cbps@meta.data,keep.rownames = "bc")
+
+mtd[,n.sample:=.N,"sample_hto"]
+mtd[,pct.lin:=.N/n.sample,c("sample_hto","lineage_int")]
+mtsl<-unique(mtd[lineage_int%in%c("LT-HSC","HSC","MPP","Erythro-Mas","Myeloid","Lymphoid")],by=c("sample_hto","lineage_int"))
+mtsl$lineage_int<-factor(mtsl$lineage_int,levels = c("LT-HSC","HSC","MPP","Erythro-Mas","Myeloid","Lymphoid"))
+ggplot(mtsl[lineage_int%in%c("LT-HSC","HSC","MPP","Erythro-Mas","Myeloid","Lymphoid")])+geom_boxplot(aes(x=hto,y=pct.lin,fill=group))+
+  facet_wrap("lineage_int",scales = "free_y")
+
+ggsave("outputs/figures_epi_response/figure4/4A-boxplot_cell_pop_diff_by_group_hto.pdf")
+
+
+mtsl[,pvalue:=wilcox.test(pct.lin[group=="lga"],pct.lin[group=="ctrl"])$p.value,by=.(hto,lineage_int)]
+unique(mtsl[,.(lineage_int,hto,pvalue)])
+
+#     lineage_int   hto    pvalue
+#  1: Erythro-Mas FALSE 0.3659674
+#  2:         MPP FALSE 0.4452214
+#  3:         HSC FALSE 0.8356643
+#  4:     Myeloid FALSE 1.0000000
+#  5:    Lymphoid FALSE 0.9452214
+#  6:      LT-HSC FALSE 0.8762626
+#  7:         MPP  TRUE 0.1418581
+#  8:         HSC  TRUE 0.4135864
+#  9: Erythro-Mas  TRUE 0.3449883
+# 10:    Lymphoid  TRUE 0.4908425
+# 11:     Myeloid  TRUE 0.7545788
+# 12:      LT-HSC  TRUE 0.5727606
+
+table(unique(mtsl,by="sample_hto")$group_hto)
+
 
 #4B : Pseudotime
 
