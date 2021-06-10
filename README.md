@@ -18,8 +18,8 @@ renv::snapshot() #git commit
 
 ``` bash
 cd 
-ln -s /disks/DATATMP/PhD_AlexandrePelletier/methyl/methyl/datasets datasets
-ln -s /disks/DATATMP/PhD_AlexandrePelletier/methyl/methyl/ref ref
+ln -s /disks/DATATMP/PhD_AlexandrePelletier/methyl/datasets datasets
+ln -s /disks/DATATMP/PhD_AlexandrePelletier/methyl/ref ref
 ln -s /disks/DATATMP/HSPC_EpiStress_AlexandrePelletier/methyl/ old 
 ```
 

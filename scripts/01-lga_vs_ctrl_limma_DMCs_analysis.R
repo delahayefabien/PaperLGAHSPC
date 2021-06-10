@@ -265,7 +265,7 @@ ggplot(res_batch)+
 ggsave(fp(out,"fig1A.volcanos_limma_cohorts_C.L.png"),width = 12,height = 5)
 
 #interesection
-install.packages("VennDiagram")
+# renv::install("VennDiagram")
 library(VennDiagram)
 # Fonction d'aide pour afficher le diagramme de Venn
 display_venn <- function(x, ...){
