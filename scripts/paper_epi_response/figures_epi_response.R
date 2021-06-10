@@ -234,7 +234,12 @@ wrap_plots(ps)
 ggsave(fp(out,"2supp-umap_key_genes_by_lin.pdf"),width = 12,height = 12)
 
 
+
 #2supp : CTRL LGA basale
+#lineage bias
+
+
+#pseudobulk deseq2
 #all 
 res_ctrl_lga<-fread("../singlecell/outputs/08-DEGs_LGA_no_stress/pseudobulk_deseq2_all_cbps/res_de_analysis_all_genes.csv")
 
@@ -392,7 +397,7 @@ ggplot(mtd_dup)+geom_bar(aes(x=hto,fill=lineage_int),position = "fill")+facet_wr
 
 #HSC enrichment after hto stim due to what ?
 #see 2B-supp 
-#=> due to MPP EMP ++ stress response through mito ++ activation donc removs during QC filtering
+#=> due to MPP / EMP ++ stress response through mito ++ activation donc remove during QC filtering
 
 
 #heatmap signature by lineage

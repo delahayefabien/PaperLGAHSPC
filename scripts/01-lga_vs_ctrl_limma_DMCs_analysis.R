@@ -237,6 +237,7 @@ ggsave(fp(out,"volcano_plot.png"))
 table(mtd_f$batch)
 vars_to_include<-c("mat.age","group_complexity_fac","group_sex","latino","PC2")
 
+
 res_batch<-Reduce(rbind,lapply(1:2,function(b){
   mtd_fc<-mtd_f[batch==b]
   formule<- ~0 + group_sex  + group_complexity_fac +mat.age  + latino + PC2

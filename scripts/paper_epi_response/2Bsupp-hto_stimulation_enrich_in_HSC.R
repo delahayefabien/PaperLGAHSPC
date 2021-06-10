@@ -259,9 +259,11 @@ VlnPlot(cbp4_all,c("predicted.cell_type.score"),
 #- vaut mieux basé son annotation sur predicted.cell_type que predicted.lineage car plus accurate
 
 #test redefine percent mt
+cbp4_all<-readRDS("../singlecell/outputs/01-Analyses_Individuelles/CBP4_HiDepth/cbp4_all_cells_recov_mt_activ.rds")
 VlnPlot(cbp4_all,c("percent.mt"), 
-        group.by = "predicted.cell_type")
-
+        group.by = "predicted.lineage")
+Idents(cbp4_all)<-"predicted.lineage"
+wrap_plots(lapply(levels(cbp4_all),function(lin)FeatureScatter(cbp4_all,"percent.mt","nCount_RNA",cells =WhichCells(cbp4_all,idents = lin ))+ggtitle(lin)),)
 
 
 cbp4_all$status_cells<-paste(ifelse(cbp4_all$dying_cand,"filtered","kept"),ifelse(cbp4_all$percent.mt<ifelse(str_detect(cbp4_all$predicted.cell_type,"MPP"),75,50),"activ","dead"),sep="_")
