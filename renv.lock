@@ -1899,16 +1899,9 @@
     },
     "renv": {
       "Package": "renv",
-      "Version": "0.12.5",
-      "Source": "CRAN",
-      "Repository": "CRAN",
-      "RemoteType": "standard",
-      "RemotePkgRef": "renv",
-      "RemoteRef": "renv",
-      "RemoteRepos": "https://cloud.r-project.org/",
-      "RemotePkgType": "source",
-      "RemoteSha": "0.12.5",
-      "Hash": "5c0cdb37f063c58cdab3c7e9fbb8bd2c"
+      "Version": "0.13.2",
+      "Source": "Repository",
+      "Repository": "CRAN"
     },
     "reshape": {
       "Package": "reshape",
