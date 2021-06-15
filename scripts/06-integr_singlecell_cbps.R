@@ -1,5 +1,5 @@
 #integr CBPs datasets thanks to hematomap
-out<-"outputs/07-integr_singlecell_cbps"
+out<-"outputs/06-integr_singlecell_cbps"
 dir.create(out)
 source("scripts/utils/new_utils.R")
 source("../singlecell/scripts/utils/HTO_utils.R")
@@ -702,15 +702,15 @@ saveRDS(cbp7c_qc,fp(out,"cbp7c.rds"))
 #### INTEGRATION ####
 #based on Hematomap  (see 01-Make_Hematomap )
 options(future.globals.maxSize = 50000 * 1024^2)
-out<-"outputs/02-integr_cbps"
+out<-"outputs/06-integr_singlecell_cbps"
 source("../methyl/scripts/utils/new_utils.R")
 library(Seurat)
 library(parallel)
 
-hmap<-readRDS("outputs/01-make_hematomap/hematomap_ctrls_sans_stress.rds")
+hmap<-readRDS("outputs/05-make_hematomap/hematomap_ctrls_sans_stress.rds")
 hmap
 DefaultAssay(hmap)<-"integrated"
-hmap[["pca.annoy.neighbors"]] <- LoadAnnoyIndex(object = hmap[["pca.annoy.neighbors"]], file = "outputs/01-make_hematomap/reftmp.idx")
+hmap[["pca.annoy.neighbors"]] <- LoadAnnoyIndex(object = hmap[["pca.annoy.neighbors"]], file = "outputs/05-make_hematomap/reftmp.idx")
 
 cbps_run<-c("cbp0_ctrl","cbp0_lga",
             paste0("cbp",2:4),
@@ -718,7 +718,7 @@ cbps_run<-c("cbp0_ctrl","cbp0_lga",
             "cbp8")
 length(cbps_run)#12
   
-cbps_list<-lapply(cbps_run, function(run)readRDS(fp("outputs/02-integr_cbps/",ps(run,".rds"))))
+cbps_list<-lapply(cbps_run, function(run)readRDS(fp(out,ps(run,".rds"))))
 cbps_list
 
 cbps_list<-mclapply(cbps_list,function(x){
@@ -805,31 +805,31 @@ DimPlot(cbps, group.by = 'cell_type_hmap',reduction = "denovo.umap", label = TRU
 DimPlot(cbps, group.by = 'lineage_hmap',reduction = "denovo.umap", label = TRUE)
 
 saveRDS(cbps,fp(out,"cbps.rds"))
-cbps<-readRDS("outputs/02-integr_cbps/cbps.rds")
+cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps.rds")
 
 cbps_f<-subset(cbps,lineage_hmap!="18"&ambigous==F&group!="iugr")
-cbps_f#40578 cells
+rm(cbps)
+cbps_f#44393 cells
 mtd<-data.table(cbps_f@meta.data,keep.rownames="bc")
 ggplot(mtd)+geom_bar(aes(x=sample_hto,fill=lineage_hmap),position = "fill")
 mtd[,n.sample:=.N,by="sample_hto"]
 mtd[,pct.lin:=.N/n.sample,by=c("sample_hto","lineage_hmap")]
-
 ggplot(unique(mtd,by=c("sample_hto","lineage_hmap")))+geom_boxplot(aes(x=hto,y=pct.lin,fill=group))+facet_wrap("lineage_hmap",scales = "free")
+
+mtd[,pct.ct:=.N/n.sample,by=c("sample_hto","cell_type_hmap")]
+ggplot(unique(mtd,by=c("sample_hto","cell_type_hmap")))+geom_boxplot(aes(x=hto,y=pct.ct,fill=group))+facet_wrap("cell_type_hmap",scales = "free")
 
 unique(mtd[group=="ctrl"&pct.lin<0.1&lineage_hmap=="HSC"],by="sample_hto")
-  
-ggplot(unique(mtd,by=c("sample_hto","lineage_hmap")))+geom_boxplot(aes(x=hto,y=pct.lin,fill=group))+facet_wrap("lineage_hmap",scales = "free")
-
 
 ggplot(mtd[sample%in%c("ctrlM555","ctrlM518","ctrlM537")])+
   geom_bar(aes(x=hto,fill=lineage_hmap),position = "fill")+
   facet_wrap("sample",scales = "free")
 
-
-saveRDS(cbps_f,fp(out,"cbps_filtered.rds"))
-
-mtd<-data.table(cbps_f@meta.data,keep.rownames='bc')
 fwrite(mtd,fp(out,"metadata_cbps_filtered.csv.gz"))
+
 mtd[,toy_data:=bc%in%sample(bc,ceiling(.N/10)),.(sample_hto,lineage_hmap)]
 mtd[toy_data==T]
 saveRDS(cbps_f[,mtd[toy_data==T]$bc],fp(out,"cbps_4k.rds"))
+
+saveRDS(cbps_f,fp(out,"cbps_filtered.rds"))
+
