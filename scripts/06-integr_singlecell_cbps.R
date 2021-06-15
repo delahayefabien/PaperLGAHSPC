@@ -805,12 +805,17 @@ DimPlot(cbps, group.by = 'cell_type_hmap',reduction = "denovo.umap", label = TRU
 DimPlot(cbps, group.by = 'lineage_hmap',reduction = "denovo.umap", label = TRUE)
 
 saveRDS(cbps,fp(out,"cbps.rds"))
+
 cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps.rds")
 
 cbps_f<-subset(cbps,lineage_hmap!="18"&ambigous==F&group!="iugr")
 rm(cbps)
 cbps_f#44393 cells
 mtd<-data.table(cbps_f@meta.data,keep.rownames="bc")
+
+#check subpop distr
+mtd$lineage_hmap<-factor(mtd$lineage_hmap,levels = c("LT-HSC","HSC","MPP/LMPP","Lymphoid","B cell","T cell","Erythro-Mas","Mk/Er","Myeloid","DC"))
+
 ggplot(mtd)+geom_bar(aes(x=sample_hto,fill=lineage_hmap),position = "fill")
 mtd[,n.sample:=.N,by="sample_hto"]
 mtd[,pct.lin:=.N/n.sample,by=c("sample_hto","lineage_hmap")]
@@ -824,6 +829,7 @@ unique(mtd[group=="ctrl"&pct.lin<0.1&lineage_hmap=="HSC"],by="sample_hto")
 ggplot(mtd[sample%in%c("ctrlM555","ctrlM518","ctrlM537")])+
   geom_bar(aes(x=hto,fill=lineage_hmap),position = "fill")+
   facet_wrap("sample",scales = "free")
+table(mtd[sample=="ctrlM537",.(lineage_hmap,hto)])
 
 fwrite(mtd,fp(out,"metadata_cbps_filtered.csv.gz"))
 
@@ -833,3 +839,7 @@ saveRDS(cbps_f[,mtd[toy_data==T]$bc],fp(out,"cbps_4k.rds"))
 
 saveRDS(cbps_f,fp(out,"cbps_filtered.rds"))
 
+#check good assignmenet
+
+VlnPlot(cbps_f,"predicted.cell_type.score",group.by = "predicted.cell_type")
+#OK
