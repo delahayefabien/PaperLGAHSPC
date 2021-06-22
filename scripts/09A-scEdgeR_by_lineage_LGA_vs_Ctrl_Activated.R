@@ -4,7 +4,7 @@ library(edgeR)
 library(parallel)
 source("../methyl/scripts/utils/new_utils.R")
 
-out<-"outputs/07-LGA_vs_Ctrl_Basal"
+out<-"outputs/09-LGA_vs_Ctrl_Activated"
 dir.create(out,recursive=T)
 
 cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps_filtered.rds")
