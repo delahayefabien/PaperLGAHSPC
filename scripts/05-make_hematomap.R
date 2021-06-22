@@ -2,16 +2,16 @@ source("../methyl/scripts/utils/new_utils.R")
 library(Seurat)
 options(future.globals.maxSize = 50000 * 1024^2)
 sample_name<-"hematomap_ctrls_sans_stress"
-out<-"outputs/06-make_hematomap/"
+out<-"outputs/05-make_hematomap/"
 dir.create(out)
 
-hmap_list<-list(ctrl0=readRDS("analyses/01-Analyses_Individuelles/CD34_CTRL_CBP547/2020-05-28_seurat_obj2_final.rds"),
-              ctrlF544=subset(readRDS("analyses/01-Analyses_Individuelles/CBP6-a/cbp6a.rds"),sample=="ctrlF544"),
-              ctrlF545=subset(readRDS("analyses/01-Analyses_Individuelles/CBP6-b/cbp6b.rds"),sample=="ctrlF545"),
-              ctrlF541=subset(readRDS("analyses/01-Analyses_Individuelles/CBP6-c/cbp6c.rds"),sample=="ctrlF541"),
-              ctrlM555=subset(readRDS("analyses/01-Analyses_Individuelles/cbp7a/cbp7a_singlet.rds"),sample=="ctrlM555"),
-              ctrlM518=subset(readRDS("analyses/01-Analyses_Individuelles/cbp7b/cbp7b_singlet.rds"),sample=="ctrlM518"),
-              ctrlM537=readRDS("analyses/01-Analyses_Individuelles/cbp7c/cbp7c_singlet.rds")
+hmap_list<-list(ctrl0=readRDS("../singlecell/outputs/01-Analyses_Individuelles/CD34_CTRL_CBP547/2020-05-28_seurat_obj2_final.rds"),
+              ctrlF544=subset(readRDS("../singlecell/outputs/01-Analyses_Individuelles/CBP6-a/cbp6a.rds"),sample=="ctrlF544"),
+              ctrlF545=subset(readRDS("../singlecell/outputs/01-Analyses_Individuelles/CBP6-b/cbp6b.rds"),sample=="ctrlF545"),
+              ctrlF541=subset(readRDS("../singlecell/outputs/01-Analyses_Individuelles/CBP6-c/cbp6c.rds"),sample=="ctrlF541"),
+              ctrlM555=subset(readRDS("../singlecell/outputs/01-Analyses_Individuelles/cbp7a/cbp7a_singlet.rds"),sample=="ctrlM555"),
+              ctrlM518=subset(readRDS("../singlecell/outputs/01-Analyses_Individuelles/cbp7b/cbp7b_singlet.rds"),sample=="ctrlM518"),
+              ctrlM537=readRDS("../singlecell/outputs/01-Analyses_Individuelles/cbp7c/cbp7c_singlet.rds")
               )
 
 lapply(hmap_list, function(x)head(x@meta.data))

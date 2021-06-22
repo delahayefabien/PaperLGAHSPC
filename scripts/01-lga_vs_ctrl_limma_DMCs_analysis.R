@@ -9,7 +9,7 @@ meth_file<-here("datasets/cd34/CD34_angle_119_noEmptyLocis_withConfScore_without
 mtd_file<-here("datasets/cd34/cleaned_batch_CD34_library_date_220620.csv")
 
 
-#Loading
+#Loading====
 
 mtd<-fread(mtd_file,
             select = c("sample","Group_name","Gender","Group_Sex",
@@ -55,7 +55,7 @@ plot(density(na.omit(as.matrix(meth[,.SD,.SDcols=mtd$sample]))))
 abline(v=10)
 
 
-#CpG filtering
+#CpG filtering====
 # add useful quality metrics 
 
 meth[,n.na:=rowSums(is.na(.SD)),.SDcols=mtd$sample]
@@ -77,10 +77,10 @@ methf<-methf[!(pct.zero>0.7&n.methyl.not.zero==0)]
 methf #754931 CpGs after filtering
 
 fwrite(methf,"datasets/cd34/meth_data_filtered.csv.gz")
+
+
+#FOCUS ON CTRL LGA====
 methf<-fread("datasets/cd34/meth_data_filtered.csv.gz")
-
-
-#FOCUS ON CTRL LGA
 mtd<-mtd[group%in%c("CTRL","LGA")]
 fwrite(mtd,"datasets/cd34/metadata_cl_190421.csv",sep=";")
 mtd<-fread("datasets/cd34/metadata_cl_190421.csv",sep=";")
@@ -95,7 +95,7 @@ table(mtd[,.(group,sex)])
 #   LGA  21 21
 
 
-#COVARIATES ANALYSIS
+#COVARIATES ANALYSIS====
 # check no vars too much unique individual by levels (singleton)
 bool_vars<-c("latino","preterm","GDM","drugs","etoh", "smoking")
 categorical_vars<-c(bool_vars,"group","sex","group_sex","ethnicity","lab","batch","date","DNA.extraction","sequencing","year")
@@ -194,14 +194,14 @@ summary(lm(PC1~group_complexity_fac+group_sex+latino,data = pc_mtd)) #can see th
 
 
 # so include batch,mat.age, group_complexity_fac,group_sex and PC2 in the model 
-vars_to_include<-c("batch","mat.age","group_complexity_fac","group_sex","latino","PC2")
 
-
-#DATA MODELING and DMC analysis with limma
+#DATA MODELING and DMC analysis with limma====
 # exclude samples without all necessary clinical infos
+vars_to_include<-c("batch","mat.age","group_complexity_fac","group_sex","latino","PC2")
 mtd_f<-pc_mtd[,to_keep:=rowSums(is.na(.SD))==0,.SDcols=vars_to_include][to_keep==T]
 fwrite(mtd_f,"datasets/cd34/metadata_cl_pcs_040521.csv")
 mtd_f<-fread("datasets/cd34/metadata_cl_pcs_040521.csv")
+
 
 table(mtd_f$group,mtd_f$sex)
 formule<- ~0 + group_sex   + batch+ group_complexity_fac +mat.age  + latino + PC2
@@ -217,7 +217,6 @@ fit2  <- contrasts.fit(fit, cont.matrix)
 fit2  <- eBayes(fit2)
 
 res<-data.table(topTable(fit2,coef = "C.L",n = Inf),keep.rownames = "cpg_id")
-res[adj.P.Val<=0.1&abs(logFC)>25] #1255 cpgs
 
 fwrite(res,fp(out,"res_limma.tsv.gz"),sep="\t")
 res<-fread(fp(out,"res_limma.tsv.gz"),sep="\t")

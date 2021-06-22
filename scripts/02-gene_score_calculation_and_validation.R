@@ -12,10 +12,10 @@ res<-fread("outputs/01-lga_vs_ctrl_limma_DMCs_analysis/res_limma.tsv.gz",sep="\t
 mtd<-fread("datasets/cd34/metadata_pcs_cl_190421.csv",sep=";")
 
 #link cpg to gene and weitgh link confidence
-# 1)annots cpg 
+# 1)annots cpg ====
 #see 02A-
 
-# 2) calculate cpg weight
+# 2) calculate cpg weight====
 cpgs_anno<-fread("outputs/02A-CpGs_annotations/cpgs_annot.csv.gz")
 cpgs_genes<-cpgs_anno[!is.na(gene)&gene!=""]
 rm(cpgs_anno)
@@ -92,7 +92,7 @@ fwrite(cpgs_score,fp(out,"cpgs_genes_annot_and_weight.csv.gz"))
 
 res_anno<-merge(res,cpgs_score,by="cpg_id")
 
-#GeneScore calculation
+#GeneScore calculation====
 # pval
 res_anno[,min.pval:=min(pval[which(in_eQTR==F)],na.rm = T),by=c("gene")]
 res_anno[,avg.pval:=mean(-log10(pval[in_eQTR==F]),na.rm = T),by=c("gene")]
@@ -160,7 +160,7 @@ ggplot(resg)+
       geom_boxplot(aes(x = as.factor(n.cpg.gene),y =gene_score_add )) 
 
 
-#VALIDATION  Gene Score
+#VALIDATION  Gene Score====
 # 1)valid wieight
 #see correl covariates with genescore
 summary(lm(gene_score_add~n.cpg.gene+n.cpg.sig.gene+pval+meth.change+chromatin_feature+ensembl_reg_score+in_eQTR+abs(tss_dist),data = resg)) #best gene_score_add than gene_score

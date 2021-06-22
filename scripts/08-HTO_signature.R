@@ -8,7 +8,7 @@ dir.create(out)
 
 cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps_filtered.rds")
 
-#0) signature : same sample hto vs not
+#0) signature : same sample hto vs not####
 #a) signature all cbps
 library(Seurat)
 library(Matrix)
@@ -89,7 +89,7 @@ saveRDS(res_go_bp,fp(out,"res_hto_signature_go_bp.rds"))
 res_go_bp_dt<-data.table(as.data.frame(res_go_bp))
 fwrite(res_go_bp_dt,fp(out,"res_hto_signature_go_bp.csv"))
 
-#b) signature by lineage
+#b) signature by lineage####
 out1<-fp(out,"by_lineage")
 dir.create(out1)
 Idents(cbps_dup)<-"lineage_hmap"
@@ -174,7 +174,7 @@ table(res_go_bp_lin_dt$lineage)
 fwrite(res_go_bp_lin_dt,fp(out1,"res_hto_signature_go_bp_by_lineage.csv"))
 
 
-#I) ctrl vs ctrl hto
+#I) ctrl vs ctrl hto####
 source("scripts/utils/new_utils.R")
 cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps_filtered.rds")
 cbps_sub<-subset(cbps,group=="ctrl")
@@ -235,7 +235,7 @@ res_dt[,lineage:="all_cbps"]
 fwrite(res_dt,fp(out,"res_all_cbps_de_analysis.csv"),sep=";")
 
 
-#II) same in lga
+#II) same in lga####
 cbps_sub<-subset(cbps,group=="lga")
 
 out<-"outputs/08-HTO_signature/pseudobulk_DESeq2_lga_hto"
@@ -291,7 +291,7 @@ res_dt[padj<0.05] #1369
 res_dt[,lineage:="all_cbps"]
 fwrite(res_dt,fp(out,"res_all_cbps_de_analysis.csv"),sep=";")
 
-#IV) ctrl lga hto
+#IV) ctrl lga hto####
 cbps_sub<-subset(cbps,hto==T&group%in%c("ctrl","lga")&ambigous==F&orig.ident!="cd34_hto1_0C1I1L")
 
 out<-"outputs/08-HTO_signature/pseudobulk_DESeq2_lga_vs_ctrl_hto"

@@ -808,6 +808,7 @@ saveRDS(cbps,fp(out,"cbps.rds"))
 
 cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps.rds")
 
+####CHECK INTEGR OK####
 cbps_f<-subset(cbps,lineage_hmap!="18"&ambigous==F&group!="iugr")
 rm(cbps)
 cbps_f#44393 cells
