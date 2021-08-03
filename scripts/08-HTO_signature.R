@@ -8,6 +8,13 @@ dir.create(out)
 
 cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps_filtered.rds")
 
+#cellcycle activation 
+mtd<-data.table(cbps@meta.data,keep.rownames = "bc")
+
+ggplot(mtd[differentiated==F&group=="ctrl"])+geom_bar(aes(x=hto,fill=Phase),position = "fill")+
+  facet_wrap("lineage_hmap")
+
+
 #0) signature : same sample hto vs not####
 #a) signature all cbps
 library(Seurat)
@@ -21,10 +28,27 @@ cbps_dup<-subset(cbps,sample%in%c("ctrlM555","ctrlM518","ctrlM537"))
 table(cbps_dup$hto,cbps_dup$sample)
 #get mtd of interest
 mtd<-data.table(cbps_dup@meta.data,keep.rownames = "bc")
+#cell cycle activation
+ggplot(mtd[differentiated==F])+geom_bar(aes(x=hto,fill=Phase),position = "fill")+
+  facet_grid(sample~lineage_hmap)
+
+ggplot(mtd[lineage_hmap%in%c("HSC","MPP/LMPP")])+geom_bar(aes(x=hto,fill=Phase),position = "fill")+
+  facet_grid(lineage_hmap~sample)+
+  coord_cartesian(ylim = c(0,0.5))+
+  theme_minimal()+scale_fill_manual(values = c("white","orange","blue"))
+
+mtd[,pct.cc:=sum(Phase%in%c("G2M","S"))/.N,.(lineage_hmap,sample,hto)]
+
+ggplot(unique(mtd[lineage_hmap%in%c("HSC","MPP/LMPP","Lymphoid")],by=c("lineage_hmap","sample","hto")))+
+  geom_boxplot(aes(x=hto,y=pct.cc,fill=hto),position = "dodge")+
+  facet_wrap("lineage_hmap",scales = "free")
 
 mts<-unique(mtd,by=c("sample","orig.ident"))
 
 
+
+
+#DEGs
 #get counts and filter genes lowly express
 counts<-as.matrix(cbps_dup@assays$RNA@counts)
 dim(counts) 

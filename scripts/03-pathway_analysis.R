@@ -132,56 +132,7 @@ fwrite(gsea_gwas[order(p.adjust)],fp(out,"res_gsea_gwas.csv"))
 #2) if not satisfying, with mapped gene #satisfying
 
 #PERMUT Patway====
-library(limma)
-library(parallel)
-source("scripts/utils/new_utils.R")
-set.seed(1234)
-methf<-fread("datasets/cd34/meth_data_filtered.csv.gz")
-
-mtd_f<-fread("datasets/cd34/metadata_cl_pcs_040521.csv")
-cpgs_score<-fread("outputs/02-gene_score_calculation_and_validation/cpgs_genes_annot_and_weight.csv.gz")
-
-res_perm<-Reduce(rbind,mclapply( 1:1000,function(i){
-
-  mtd_f$group_sex<-sample(mtd_f$group_sex)
-  
-  #limma
-  design<-model.matrix(~0 + group_sex   + batch+ group_complexity_fac +mat.age  + latino + PC2,
-                       data = data.frame(mtd_f,row.names = "sample"))
-  
-  fit <- lmFit(data.frame(methf,row.names = "cpg_id")[,mtd_f$sample], design)
-  
-  cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
-                               levels=design)
-  fit2  <- contrasts.fit(fit, cont.matrix)
-  fit2  <- eBayes(fit2)
-  
-  res<-data.table(topTable(fit2,coef = "C.L",n = Inf),keep.rownames = "cpg_id")
-  res[,cpg_id:=as.numeric(cpg_id)]
-  cols1<-c("cpg_id","P.Value","adj.P.Val","AveExpr","logFC")
-  cols2<-c("cpg_id","pval","padj","avg.meth","meth.change")
-  res<-res[,(cols2):=.SD,.SDcols=cols1][,.SD,.SDcols=cols2]
-  
-  res_anno<-merge(res,cpgs_score,by="cpg_id")
-
-  #genescore
-  res_anno[,cpg_score:=-log10(pval)*meth.change*links_weight*regul_weight] #divided by n_sample ro normalized gene score ~ n_sampleres_anno[,n.cpg_weight:=(1/sum(1/(abs(cpg_score)+1)))^(1/5),by="gene"] #n.cpg_weight to reduce the influence of the n_cpg by gene to the GeneScore
-  
-  res_anno[,region_type:=ifelse(abs(tss_dist)<=2000,"promoter","other")]
-  res_anno[is.na(tss_dist),region_type:="other"]
-  res_anno[,n_cpg_weight_region:=(1/sum(1/(abs(cpg_score)+1)))^(1/3.8),by=c('region_type',"gene")]
-  
-  res_anno[region_type=="promoter",gene_score_region:=sum(cpg_score)*n_cpg_weight_region,by=c("gene")]
-  res_anno[region_type=="other",gene_score_region:=sum(abs(cpg_score))*n_cpg_weight_region,by=c("gene")]
-  res_anno[,gene_score_add:=sum(unique(abs(gene_score_region)),na.rm = T),by="gene"]
-  
-  return(unique(res_anno,by="gene")[,perm:=i][order(gene)][,.(gene,gene_score_add,perm)])
-  
-  
-},mc.cores = 20))
-
-fwrite(res_perm,"outputs/02-gene_score_calculation_and_validation/res_1000perm_genescore_add.csv.gz")
-
+res_perm<-fread("outputs/02-gene_score_calculation_and_validation/res_1000perm_genescore_add.csv.gz")
  #pathway
 library(clusterProfiler)
 library(org.Hs.eg.db)
@@ -209,54 +160,26 @@ res_k_perm<-Reduce(rbind,mclapply(1:1000,function(i){
 
 fwrite(res_k_perm,"outputs/03-pathway_analysis/res_1000perm_kegg.csv.gz")
 
+#check res
+source("scripts/utils/new_utils.R")
+res_k_perm<-fread("outputs/03-pathway_analysis/res_1000perm_kegg.csv.gz")
+res_k_perm
+res_k<-fread("outputs/03-pathway_analysis/res_gsea_kegg.csv")
+res_kp<-merge(res_k,res_k_perm[ID%in%res_k$ID],all=T)
+res_kp[,p.perm:=sum(p.adjust[is.na(perm)]>=p.adjust[!is.na(perm)])/1000,by="ID"]
+
+res_kpf<-res_kp[is.na(perm)][,-"perm"]
+res_kpf[p.perm<0.05]# 32/63 are signif
+
+fwrite(res_kpf,"outputs/03-pathway_analysis/res_gsea_kegg_perm.csv")
 #go bp
-res_g_perm<-Reduce(rbind,mclapply(1:1000,function(i){
-  resg<-res_perm[perm==i]
-  gene_scores<-resg$gene_score_add
-  names(gene_scores)<-resg$gene
-  gene_scores<-sort(gene_scores,decreasing = T)
-  
-  genes.df<-bitr(names(gene_scores),
-                 fromType = 'SYMBOL',
-                 toType = 'ENTREZID',
-                 OrgDb = org.Hs.eg.db)
-  gene_scores<-gene_scores[genes.df$SYMBOL]
-  names(gene_scores)<-genes.df$ENTREZID
+system("nohup Rscript scripts/03A-go_bp_perm.r > logs/03A-go_bp_perm.log &")
+#run go_bp_perm.r
 
-  res_gsea_go<- data.table(as.data.frame(gseGO(geneList     = rank(gene_scores), 
-                                               ont = "BP",
-                                                minGSSize    = 50,
-                                                pvalueCutoff = 1,
-                                                eps = 0,
-                                                OrgDb = org.Hs.eg.db)))
-  
-  return(res_gsea_go[,perm:=i][,.(ID,p.adjust,perm)])}))
-
-fwrite(res_g_perm,"outputs/03-pathway_analysis/res_1000perm_go.csv.gz")
 
 #gwas
-gwas_genes_rep10<-fread("ref/gwas/reported_gene_traits_GWAS_10genes.csv")
+system("nohup Rscript scripts/03A-gwas_perm.r > logs/03A.log &")
+#run gwas_perm.r
+res_gw_perm<-fread("outputs/03-pathway_analysis/res_gsea_gwas_perm.csv")
 
-res_g_perm<-Reduce(rbind,mclapply(1:1000,function(i){
-  resg<-res_perm[perm==i]
-  gene_scores<-resg$gene_score_add
-  names(gene_scores)<-resg$gene
-  gene_scores<-sort(gene_scores,decreasing = T)
-  
-  genes.df<-bitr(names(gene_scores),
-                 fromType = 'SYMBOL',
-                 toType = 'ENTREZID',
-                 OrgDb = org.Hs.eg.db)
-  gene_scores<-gene_scores[genes.df$SYMBOL]
-  names(gene_scores)<-genes.df$ENTREZID
-
-  res_gsea_gwas<- data.table(as.data.frame(GSEA(geneList = rank(gene_scores),
-                                              TERM2GENE = gwas_genes_rep10[,.(disease_trait,reported_gene)],
-                                              maxGSSize    = 500,
-                                              eps = 0,
-                                              pvalueCutoff = 1
-                                              )))
-  
-  return(res_gsea_gwas[,perm:=i][,.(ID,p.adjust,perm)])}))
-
-fwrite(res_g_perm,"outputs/03-pathway_analysis/res_1000perm_gwas.csv.gz")
+res_gw_perm[p.perm<0.05] #36/87

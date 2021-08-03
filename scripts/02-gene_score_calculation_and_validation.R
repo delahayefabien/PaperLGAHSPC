@@ -336,7 +336,7 @@ res_anno[,gene_score_prom:=gene_score_region[region_type=="promoter"][1],by="gen
 res_anno[,gene_score_enh:=gene_score_region[region_type=="other"][1],by="gene"]
 
 resg<-unique(res_anno[order(gene,pval)],by=c("gene"))
-fwrite(resg[,.(gene,tss_pos,gene_score_add,gene_score_prom,gene_score_enh,n.cpg.gene,n.cpg.sig.gene,n.cpg.in.eQTR,cpg_id,tss_dist,pval,padj,meth.change)],fp(out,"res_genes.csv.gz"))
+fwrite(resg[,.(gene,chr,tss_pos,gene_score_add,gene_score_prom,gene_score_enh,n.cpg.gene,n.cpg.sig.gene,n.cpg.in.eQTR,cpg_id,pos,tss_dist,pval,padj,meth.change)],"outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
 resg[,gene_score_add_scaled:=scale(gene_score_add)]
 #plot dmgs plot
 ggplot(resg,aes(x=gene_score_add,y=-log10(pval)))+
@@ -352,5 +352,69 @@ ggplot(resg,aes(x=gene_score_add,y=-log10(pval),col=padj<0.1&gene_score_add>300)
                    point.padding = 0.5,
                    segment.color = 'grey50')
 
+###PERM GENESCORE====
+library(limma)
+library(parallel)
+source("scripts/utils/new_utils.R")
+set.seed(1234)
+methf<-fread("datasets/cd34/meth_data_filtered.csv.gz")
 
+mtd_f<-fread("datasets/cd34/metadata_cl_pcs_040521.csv")
+cpgs_score<-fread("outputs/02-gene_score_calculation_and_validation/cpgs_genes_annot_and_weight.csv.gz")
+
+res_perm<-Reduce(rbind,mclapply( 1:1000,function(i){
+
+  mtd_f$group_sex<-sample(mtd_f$group_sex)
+  
+  #limma
+  design<-model.matrix(~0 + group_sex   + batch+ group_complexity_fac +mat.age  + latino + PC2,
+                       data = data.frame(mtd_f,row.names = "sample"))
+  
+  fit <- lmFit(data.frame(methf,row.names = "cpg_id")[,mtd_f$sample], design)
+  
+  cont.matrix <- makeContrasts(C.L = "(group_sexCTRL_F+group_sexCTRL_M)-(group_sexLGA_F+group_sexLGA_M)",
+                               levels=design)
+  fit2  <- contrasts.fit(fit, cont.matrix)
+  fit2  <- eBayes(fit2)
+  
+  res<-data.table(topTable(fit2,coef = "C.L",n = Inf),keep.rownames = "cpg_id")
+  res[,cpg_id:=as.numeric(cpg_id)]
+  cols1<-c("cpg_id","P.Value","adj.P.Val","AveExpr","logFC")
+  cols2<-c("cpg_id","pval","padj","avg.meth","meth.change")
+  res<-res[,(cols2):=.SD,.SDcols=cols1][,.SD,.SDcols=cols2]
+  
+  res_anno<-merge(res,cpgs_score,by="cpg_id")
+
+  #genescore
+  res_anno[,cpg_score:=-log10(pval)*meth.change*links_weight*regul_weight] #divided by n_sample ro normalized gene score ~ n_sampleres_anno[,n.cpg_weight:=(1/sum(1/(abs(cpg_score)+1)))^(1/5),by="gene"] #n.cpg_weight to reduce the influence of the n_cpg by gene to the GeneScore
+  
+  res_anno[,region_type:=ifelse(abs(tss_dist)<=2000,"promoter","other")]
+  res_anno[is.na(tss_dist),region_type:="other"]
+  res_anno[,n_cpg_weight_region:=(1/sum(1/(abs(cpg_score)+1)))^(1/3.8),by=c('region_type',"gene")]
+  
+  res_anno[region_type=="promoter",gene_score_region:=sum(cpg_score)*n_cpg_weight_region,by=c("gene")]
+  res_anno[region_type=="other",gene_score_region:=sum(abs(cpg_score))*n_cpg_weight_region,by=c("gene")]
+  res_anno[,gene_score_add:=sum(unique(abs(gene_score_region)),na.rm = T),by="gene"]
+  
+  return(unique(res_anno,by="gene")[,perm:=i][order(gene)][,.(gene,gene_score_add,perm)])
+  
+  
+},mc.cores = 20))
+
+fwrite(res_perm,"outputs/02-gene_score_calculation_and_validation/res_1000perm_genescore_add.csv.gz")
+
+res_perm<-fread("outputs/02-gene_score_calculation_and_validation/res_1000perm_genescore_add.csv.gz")
+resg<-fread("outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
+resg[,perm:=0]
+resg_perm<-rbind(resg[,.(gene,gene_score_add,perm)],res_perm)
+resg_perm[,pval_gs:=sum(gene_score_add[perm==0]<=gene_score_add[perm!=0])/1000,by="gene"]
+resgp<-resg_perm[perm==0][,-"perm"]
+resg2<-merge(resg[,-"perm"],resgp[,.(gene,pval_gs)])
+fwrite(resg2[,.SD,.SDcols=c(1,4,ncol(resg2),2:3,5:(ncol(resg2)-1))],"outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
+
+resg2[gene_score_add>1200&pval_gs<0.01]$gene
+plot(density(resg$gene_score_add))
+abline(v=200)
+abline(v=quantile(resg2$gene_score_add,0.90))
+resg2[gene%in%c("SOCS3","HES1")]
 #NEXT, PAthway analysis, see 03-

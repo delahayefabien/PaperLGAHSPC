@@ -4,6 +4,7 @@ source("scripts/utils/new_utils.R")
 cpgs<-fread("datasets/cd34/CD34_angle_119_noEmptyLocis_withConfScore_withoutChrXY.txt",
             select = c("id","chr","start"),
             col.names = c("cpg_id","chr","pos"))
+fwrite(cpgs,"ref/all_HELP_tagging_cpgs_hg19_pos.csv")
 out<-"outputs/02A-CpGs_annotations"
 dir.create(out)
 

@@ -40,6 +40,7 @@ numerical_vars<-c("weight.g","weight_at_term.lbs","gest.age.wk","length.cm","mat
 meth<-fread(meth_file,
             select = c("id","chr","start",mtd$sample,"msp1c","confidenceScore"),
             col.names = c("cpg_id","chr","pos",mtd$sample,"msp1c","confidence_score"))
+nrow(meth) #1709224
 
 all(mtd$sample%in%colnames(meth))
 nrow(mtd) #119
@@ -68,9 +69,14 @@ meth[,n.methyl.not.zero:=rowSums(.SD>0&.SD<10,na.rm = T),.SDcols=mtd$sample]
 
 #   see 01A-CpG_filtering to see how we determine the threshold,
 
+
+quantile(meth$msp1c,0.125,na.rm = T)*76541158 #total number of msp1 count
 methf<-meth[msp1c>quantile(msp1c,0.125,na.rm=T)&n.na==0]
 
 methf<-methf[n.not.methyl>4]
+
+quantile(meth$confidence_score,0.2,na.rm = T) *76541158
+
 methf<-methf[confidence_score>quantile(confidence_score,0.2,na.rm=T)]
 methf<-methf[!(pct.zero>0.7&n.methyl.not.zero==0)]
 
@@ -202,6 +208,11 @@ mtd_f<-pc_mtd[,to_keep:=rowSums(is.na(.SD))==0,.SDcols=vars_to_include][to_keep=
 fwrite(mtd_f,"datasets/cd34/metadata_cl_pcs_040521.csv")
 mtd_f<-fread("datasets/cd34/metadata_cl_pcs_040521.csv")
 
+nrow(mtd_f)
+table(mtd_f$group,mtd_f$batch)
+  #    1  2
+  # CTRL 18 16
+  # LGA  20 16
 
 table(mtd_f$group,mtd_f$sex)
 formule<- ~0 + group_sex   + batch+ group_complexity_fac +mat.age  + latino + PC2
