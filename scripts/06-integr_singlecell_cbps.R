@@ -304,7 +304,7 @@ cbp8_qc <- HTODemux(cbp8_qc, assay = "HTO",positive.quantile = 0.97)
 
 table(cbp8_qc$HTO_classification.global)
  # Doublet Negative  Singlet 
- #     750     1479     3633 
+ #     843     1367     3652 
 
 
 cbp8_qc_s<-subset(cbp8_qc,HTO_classification.global=="Singlet")
@@ -385,7 +385,6 @@ cbp0_lga_qc$sample<-"lgaF552"
 saveRDS(cbp0_lga_qc,fp(out,"cbp0_lga.rds"))
 
 
-#[stop here]
 
 #cbp6a####
 sample<-"cbp6a"
@@ -798,6 +797,22 @@ cbps[["lineage_hmap"]]<-sapply(as.character(cbps@meta.data$cell_type_hmap), func
 })
 
 cbps$differentiated<-cbps$lineage_hmap%in%c("Mk/Er","18","DC","T cell","B cell")
+
+#check number of cells 
+#n of samples
+#all
+#non stim
+#stim
+
+#n of cells
+#all
+#non stim
+#stim
+
+#n of HSC 
+#all
+#non stim
+#stim
 
 #denovo umap
 cbps <- RunUMAP(cbps, reduction = 'ref.pca', dims = 1:30,reduction.name = "denovo.umap",n.components = 2)
