@@ -6,22 +6,9 @@ dir.create(out,recursive = T)
 
 #EPIGENETIC PROGRAMMING
 #figure 1
-#supp : cohort validation ####
 
-res_coh<-fread("outputs/01-lga_vs_ctrl_limma_DMCs_analysis/res_limma_cohorts.tsv.gz")
 
-res_coh[P.Value<0.001&abs(logFC)>25&batch==1&compa=="C.L"] #2220
-
-nrow(res_coh[P.Value<0.001&logFC>25&batch==1&compa=="C.L"])/
-  nrow(res_coh[P.Value<0.001&abs(logFC)>25&batch==1&compa=="C.L"] )#94%
-
-res_coh[P.Value<0.001&logFC>25&batch==2&compa=="C.L"] #2250
-nrow(res_coh[P.Value<0.001&logFC>25&batch==2&compa=="C.L"])/
-  nrow(res_coh[P.Value<0.001&abs(logFC)>25&batch==2&compa=="C.L"] )#96%
-length(intersect(res_coh[P.Value<0.001&abs(logFC)>25&batch==2&compa=="C.L"]$cpg_id,
-                 res_coh[P.Value<0.001&abs(logFC)>25&batch==1&compa=="C.L"]$cpg_id))
-
-#1A : volcanoplot ####
+#1A : volcanoplot 
 res<-fread("outputs/01-lga_vs_ctrl_limma_DMCs_analysis/res_limma.tsv.gz")
 res[,meth.change:=logFC][,p_val_adj:=adj.P.Val][,p_val:=P.Value]
 
@@ -35,20 +22,8 @@ ggplot(res)+
 ggsave(fp(out,"1A-volcano_plot_hypermet_LGA.png"))
 ggsave(fp(out,"1A-volcano_plot_hypermet_LGA.pdf"))
 
-#1supp : Genescore####
-resg<-fread("outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
-
-#1B : pathway GSEA ####
+#1B : pathway GSEA 
 library(enrichplot)
-
-#kegg
-res_kegg<-readRDS("outputs/03-pathway_analysis/res_gsea_kegg.rds")
-
-pdf(fp(out,"1B-emapplot_gsea_kegg.pdf"),width = 14,height = 8)
-emapplot(pairwise_termsim(res_kegg,showCategory = 30),showCategory = 30)
-dev.off()
-
-#go
 res_go<-readRDS("outputs/03-pathway_analysis/res_gsea_go.rds")
 max(data.table(as.data.frame(res_go))$p.adjust) #699 go term with padj < 0,001
 pdf(fp(out,"1B-emapplot_gsea_go.pdf"),width = 14,height = 8)
@@ -61,32 +36,7 @@ pdf(fp(out,"1B-dotplot_gsea_go_x_avg_genescore.pdf"),width = 8,height = 10)
 dotplot(res_go,x=gsea_go[order(p.adjust)]$gene_score.avg[1:40],showCategory=40)
 dev.off()
 
-# both :
-df_kegg_go<-merge(res_kegg,res_go,all=T) #merge in a dataframe
-head(df_kegg_go)
-#need transfoom in enrichment results :
-# renv::install("bioc::ComplexHeatmap") #need this dependensies 
-# renv::install("jmw86069/multienrichjam")
-library(multienrichjam)
-res_kegg_go<-enrichDF2enrichResult(df_kegg_go,keyColname = "ID",pvalueColname = "p.adjust",geneColname = "leading_edge")
-data.table(as.data.frame(res_kegg_go))[!str_detect(ID,"GO")]
-
-emapplot(pairwise_termsim(res_kegg_go,showCategory = 80),showCategory = 80)#not well informative
-
-
-#gwas :
-res_gwas<-readRDS("outputs/03-pathway_analysis/res_gsea_gwas.rds")
-max(data.table(as.data.frame(res_gwas))$p.adjust) #86 go term with padj < 0,01
-
-pdf(fp(out,"1B-emapplot_gsea_gwas.pdf"),width = 14,height = 8)
-emapplot(pairwise_termsim(res_gwas,showCategory = 86),showCategory = 86)
-dev.off()
-
-pdf(fp(out,"1B-dotplot_gsea_gwas.pdf"),width = 8,height = 12)
-dotplot(res_gwas,showCategory = 86)
-dev.off()
-
-#1C : TF motif enrichment####
+#1C : TF motif enrichment
 #with own background
 res<-fread("outputs/03B-motif_analysis/knownResults.txt",
            select = c(1,2,3,5,6,7,8,9),
@@ -103,7 +53,49 @@ ggplot(res[padj<=0.2&  n_dmc_with_motif>30][order(pval)])+geom_point(aes(x=motif
 
 ggsave("outputs/figures_epi_response/figure1/1C-motif_enrichment_homer_own_background.pdf")
 
-#with auto background
+
+#supp : cohort validation 
+
+res_coh<-fread("outputs/01-lga_vs_ctrl_limma_DMCs_analysis/res_limma_cohorts.tsv.gz")
+
+res_coh[P.Value<0.001&abs(logFC)>25&batch==1&compa=="C.L"] #2220
+
+nrow(res_coh[P.Value<0.001&logFC>25&batch==1&compa=="C.L"])/
+  nrow(res_coh[P.Value<0.001&abs(logFC)>25&batch==1&compa=="C.L"] )#94%
+
+res_coh[P.Value<0.001&logFC>25&batch==2&compa=="C.L"] #2250
+nrow(res_coh[P.Value<0.001&logFC>25&batch==2&compa=="C.L"])/
+  nrow(res_coh[P.Value<0.001&abs(logFC)>25&batch==2&compa=="C.L"] )#96%
+length(intersect(res_coh[P.Value<0.001&abs(logFC)>25&batch==2&compa=="C.L"]$cpg_id,
+                 res_coh[P.Value<0.001&abs(logFC)>25&batch==1&compa=="C.L"]$cpg_id))
+
+
+#supp : gwas 
+res_gwas<-readRDS("outputs/03-pathway_analysis/res_gsea_gwas.rds")
+max(data.table(as.data.frame(res_gwas))$p.adjust) #86 go term with padj < 0,01
+
+pdf(fp(out,"1B-emapplot_gsea_gwas.pdf"),width = 14,height = 8)
+emapplot(pairwise_termsim(res_gwas,showCategory = 86),showCategory = 86)
+dev.off()
+
+pdf(fp(out,"1B-dotplot_gsea_gwas.pdf"),width = 8,height = 12)
+dotplot(res_gwas,showCategory = 86)
+dev.off()
+
+# supp : kegg and go together [to update]
+df_kegg_go<-merge(res_kegg,res_go,all=T) #merge in a dataframe
+head(df_kegg_go)
+#need transfoom in enrichment results :
+# renv::install("bioc::ComplexHeatmap") #need this dependensies 
+# renv::install("jmw86069/multienrichjam")
+library(multienrichjam)
+res_kegg_go<-enrichDF2enrichResult(df_kegg_go,keyColname = "ID",pvalueColname = "p.adjust",geneColname = "leading_edge")
+data.table(as.data.frame(res_kegg_go))[!str_detect(ID,"GO")]
+
+emapplot(pairwise_termsim(res_kegg_go,showCategory = 80),showCategory = 80)#not well informative
+
+
+#supp : tf motif with auto background [to update]
 res<-fread("outputs/03B-motif_analysis/with_auto_background/knownResults.txt",
            select = c(1,2,3,5,6,7,8,9),
            col.names = c("motif","consensus","pval","padj","n_dmc_with_motif","pct_dmc_with_motif","n_background_with_motif","pct_background_with_motif"))
@@ -119,8 +111,7 @@ ggplot(res[padj<=0.2&  n_dmc_with_motif>30][order(pval)])+geom_point(aes(x=motif
 ggsave("outputs/figures_epi_response/figure1/1C-motif_enrichment_homer_auto_background.pdf",width = 16)
 
 
-
-#1supp : Network [to optimize]
+#supp : Network [to optimize]
 
 networks<-readRDS("outputs/04-comethylation_analysis/megena_spearman_pfn_mca_outputs.rds")
 networks
@@ -141,60 +132,39 @@ print(pnet.obj[[1]]) #not informative so next
 
 
 
-#INFLUENCE ON HSPC####
-#figure 2 : 
-out<-fp(out0,"figure2")
-dir.create(out)
+#figure 2 :  ####
 source("scripts/utils/new_utils.R")
 library(Seurat)
 hmap<-readRDS("../singlecell/outputs/02-hematopo_datasets_integration/hematomap_ctrls_sans_stress/hematomap_ctrls_sans_stress.rds")
+out<-fp(out0,"figure2")
+dir.create(out)
 
-#2A : UMAP ####
-#rm cluster 18
-hmap<-subset(hmap,cell_type!="18")
-
-#reorder celltype and lineage levels
-Idents(hmap)<-"cell_type"
-levels(hmap)<-c("LT-HSC",
-                "HSC-1",
-                "HSC-2",
-                "HSC-3",
-                "HSC-4",
-                "MPP",
-                "LMPP",
-                "CLP",
-                "proB",
-                "B cell",
-                "T cell",
-               "MPP-Ery",
-               "EMP",
-               "EMP-cycle",
-               "ErP-cycle",
-               "Mk/Er",
-               "GMP",
-               "GMP-cycle",
-               "DC")
-hmap[["cell_type"]]<-Idents(hmap)
-
-Idents(hmap)<-"lineage"
-
-levels(hmap)<-c("LT-HSC",
-                "HSC",
-                "MPP/LMPP",
-                "Lymphoid",
-                "B cell",
-                "T cell",
-                "Erythro-Mas",
-                "Mk/Er",
-                "Myeloid",
-                "DC")
-hmap[["lineage"]]<-Idents(hmap)
-DimPlot(hmap,group.by = c("cell_type","lineage"),label = T)
-ggsave("outputs/figures_epi_response/figure2/2A-hematomap.pdf")
-
-
-#2supp : key genes/ct :
+#2B: key genes/lin :
 DefaultAssay(hmap)<-"SCT"
+key_genes_lin<-c("ID1","ID2","DUSP2", #LT-HSC
+           "EGR1","AVP", #HSC
+           "MLLT3","CDK6", #MPP
+           "SELL","CD99", #LMPP
+           "LTB", #CLP
+         "VPREB1","IGLL1", # proB
+           "IGHM","CD37", #B cell
+           "TNFAIP3","CD7", #T cell
+           "GATA2", #MPP-Ery
+           "GATA1", #EMP
+           "MKI67","TOP2A", #ErP-cycle
+           "PLEK","HBD", #Mk/Er
+           "MPO","CEBPA","CTSG","AZU1", #GMP
+         "CST3","CD83") #DC
+DotPlot(hmap,features = key_genes_lin,group.by = "lineage")
+ggsave("outputs/figures_epi_response/figure2/2B-key_genes_by_lin.pdf",width = 19)
+
+#supp : umap key genes
+ps<-FeaturePlot(hmap,features = c("ID1","EGR1","AVP","GATA1","HDC","MPO","CST3","LTB","VPREB1"),combine = F)
+ps<-lapply(ps, function(x)x+NoAxes()+NoLegend())
+wrap_plots(ps)
+ggsave(fp(out,"2supp-umap_key_genes_by_lin.pdf"),width = 12,height = 12)
+
+#supp : key genes /ct
 key_genes_ct<-c("ID1","ID2","DUSP2", #LT-HSC
            "EGR1","AVP", #HSC-1
          "CXCL8","ZFP36", #HSC-2
@@ -217,75 +187,39 @@ DotPlot(hmap,features = key_genes_ct,group.by = "cell_type")
 ggsave("outputs/figures_epi_response/figure2/2Bsupp-key_genes_by_celltype.pdf",width = 23)
 
 
-#2supp : key genes by lineage
-key_genes_lin<-c("ID1","ID2","DUSP2", #LT-HSC
-           "EGR1","AVP", #HSC
-           "MLLT3","CDK6", #MPP
-           "SELL","CD99", #LMPP
-           "LTB", #CLP
-         "VPREB1","IGLL1", # proB
-           "IGHM","CD37", #B cell
-           "TNFAIP3","CD7", #T cell
-           "GATA2", #MPP-Ery
-           "GATA1", #EMP
-           "MKI67","TOP2A", #ErP-cycle
-           "PLEK","HBD", #Mk/Er
-           "MPO","CEBPA","CTSG","AZU1", #GMP
-         "CST3","CD83") #DC
-DotPlot(hmap,features = key_genes_lin,group.by = "lineage")
-ggsave("outputs/figures_epi_response/figure2/2B-key_genes_by_lin.pdf",width = 19)
-
-ps<-FeaturePlot(hmap,features = c("ID1","EGR1","AVP","GATA1","HDC","MPO","CST3","LTB","VPREB1"),combine = F)
-ps<-lapply(ps, function(x)x+NoAxes()+NoLegend())
-wrap_plots(ps)
-ggsave(fp(out,"2supp-umap_key_genes_by_lin.pdf"),width = 12,height = 12)
+#figure 3 :  ####
+source("scripts/utils/new_utils.R")
+out<-fp(out0,"figure3")
+dir.create(out)
+#figure 4 :  ####
+source("scripts/utils/new_utils.R")
+out<-fp(out0,"figure4")
+dir.create(out)
+#figure 5 :  ####
+source("scripts/utils/new_utils.R")
+out<-fp(out0,"figure5")
+dir.create(out)
+#figure 6 :  ####
+source("scripts/utils/new_utils.R")
+out<-fp(out0,"figure6")
+dir.create(out)
+#figure 7 :  ####
+source("scripts/utils/new_utils.R")
+out<-fp(out0,"figure7")
+dir.create(out)
 
 
 
-#2supp : CTRL LGA basale
-#lineage bias
 
 
-#pseudobulk deseq2
-#all 
-res_ctrl_lga<-fread("../singlecell/outputs/08-DEGs_LGA_no_stress/pseudobulk_deseq2_all_cbps/res_de_analysis_all_genes.csv")
+#figure 3####
+#3A : stimulation sign across group
 
-ggplot(res_ctrl_lga,aes(x=log2FoldChange,y=-log10(padj),col=padj<0.05&abs(log2FoldChange)>0.6))+
-  geom_point()+ 
-  geom_label_repel(aes(label = ifelse(padj<0.05&
-                                        abs(log2FoldChange)>0.6
-                                      ,gene,"")),
-                   max.overlaps = 3000,
-                   box.padding   = 0.35,
-                   point.padding = 0.5,
-                   segment.color = 'grey50')+
-  scale_color_manual(values = c("grey","red")) +
- # scale_x_continuous(limits = c(-10,10))+
-  theme_minimal() +
-  theme(legend.position = "bottom")
-ggsave(fp(out,"2supp-volcano_lga_vs_ctrl_basal.pdf"))
-
-#by lineage
-res_ctrl_lga_lin<-fread("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/comparison_basal/res_all_lineages_all_genes.csv")
-
-ggplot(res_ctrl_lga_lin,aes(x=log2FoldChange,y=-log10(padj),col=padj<0.05&abs(log2FoldChange)>0.6))+
-  geom_point()+ 
-  geom_label_repel(aes(label = ifelse(padj<0.05&
-                                        abs(log2FoldChange)>0.6
-                                      ,gene,"")),
-                   max.overlaps = 3000,
-                   box.padding   = 0.35,
-                   point.padding = 0.5,
-                   segment.color = 'grey50')+
-  scale_color_manual(values = c("grey","red")) +
-  facet_wrap("lineage")+
- # scale_x_continuous(limits = c(-10,10))+
-  theme_minimal() +
-  theme(legend.position = "bottom")
-ggsave(fp(out,"2supp-volcano_lga_vs_ctrl_basal_by_lineage.pdf"))
+#3B : LGA vs CTRL - activated condition
 
 
-#2supp : LGA vs CTRL - Basal condition####
+
+#3supp : LGA vs CTRL - Basal condition
 #same celltype distrib
 
 mtd<-fread("outputs/07-LGA_vs_Ctrl_Basal/metadata_basal.csv")
