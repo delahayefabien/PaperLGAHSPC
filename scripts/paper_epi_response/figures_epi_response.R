@@ -288,15 +288,7 @@ ggsave(fp(out,"2supp-volcano_lga_vs_ctrl_basal_by_lineage.pdf"))
 #2supp : LGA vs CTRL - Basal condition####
 #same celltype distrib
 
-cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps_filtered.rds")
-
-cbps_b<-subset(cbps,hto==F)
-
-cbps_b$lineage_hmap<-factor(cbps_b$lineage_hmap,levels = c("LT-HSC","HSC","MPP/LMPP","Lymphoid","B cell","T cell","Erythro-Mas","Mk/Er","Myeloid","DC"))
-
-mtd<-data.table(cbps_b@meta.data,keep.rownames="bc")
-mtd[,n.sample:=.N,by="sample_hto"]
-mtd[,pct.lin:=.N/n.sample,by=c("sample_hto","lineage_hmap")]
+mtd<-fread("outputs/07-LGA_vs_Ctrl_Basal/metadata_basal.csv")
 
 ggplot(unique(mtd,by=c("sample","lineage_hmap")))+
   geom_boxplot(aes(x=lineage_hmap,y=pct.lin,fill=group))
@@ -311,17 +303,13 @@ genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
                       "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",
                        "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC")
 
-ggplot(res_lin[lineage%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")],aes(x=log2FoldChange,y=-log10(padj),col=padj<0.11&abs(log2FoldChange)>0.6))+
-  geom_point()+ 
-  facet_wrap("lineage")+
-  scale_color_manual(values = c("grey","red")) +
-  theme_minimal() +
-  theme(legend.position = "bottom")
 
-ggplot(res_lin[lineage%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")],aes(x=log2FoldChange,y=-log10(padj),col=padj<0.05&abs(log2FoldChange)>0.6))+
+
+ggplot(res_lin[lineage%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")],
+       aes(x=log2FoldChange,y=-log10(padj),col=padj<0.05&abs(log2FoldChange)>0.5))+
   geom_point()+ 
   geom_label_repel(aes(label = ifelse(padj<0.05&
-                                        abs(log2FoldChange)>0.6,gene,"")),
+                                        abs(log2FoldChange)>0.5,gene,"")),
                    max.overlaps = 5000,
                    box.padding   = 0.35,
                    point.padding = 0.5,
@@ -332,6 +320,7 @@ ggplot(res_lin[lineage%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","L
   theme(legend.position = "bottom")
 ggsave("outputs/figures_epi_response/figure2/2supp-pseudo_bulk_deseq2_by_lineage_lga_vs_ctrl_basal.pdf")
 
+#[to update]
 res_lin2<-fread("outputs/07-LGA_vs_Ctrl_Basal/res_scEdgeR_by_lineage.csv.gz")
 table(res_lin2[p_val_adj<0.001&abs(avg_logFC)>0.6]$lineage_hmap)
    #   B cell          DC Erythro-Mas         HSC      LT-HSC    Lymphoid       Mk/Er 
@@ -362,32 +351,31 @@ split(res_lin2[p_val_adj<0.001&abs(avg_logFC)>0.6],res_lin2[p_val_adj<0.001&abs(
 
 #2B : Ab activation signature all cbps####
 
-out<-fp(out0,"figure2")
-#singlecell replicats
-res_hto_dup<-fread("../singlecell/outputs/03-HTOs_stimulation/duplicates/scdegs_hto_vs_not_wilcoxon.csv")
-res_hto_dup[degs_in_3==T] #309
-table(res_hto_dup[p_val_adj<0.01&abs(avg_log2FC)>0.6]$sample)
-
-ggplot(res_hto_dup,aes(x=avg_log2FC,y=-log10(p_val_adj),col=p_val_adj<0.01&abs(avg_log2FC)>0.6))+
-  geom_point()+
-  facet_wrap("sample")+
-  scale_color_manual(values = c("grey","red")) +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-
-library(VennDiagram)
-
-degs_list<-split(res_hto_dup[p_val_adj<0.01&abs(avg_log2FC)>0.6]$gene,res_hto_dup[p_val_adj<0.01&abs(avg_log2FC)>0.6]$sample)
-venn.diagram(degs_list,imagetype = "png",filename="outputs/think_tank_venn_hto_sign.png")
+# #singlecell replicats 
+# res_hto_dup<-fread("../singlecell/outputs/03-HTOs_stimulation/duplicates/scdegs_hto_vs_not_wilcoxon.csv")
+# res_hto_dup[degs_in_3==T] #309
+# table(res_hto_dup[p_val_adj<0.01&abs(avg_log2FC)>0.6]$sample)
+# 
+# ggplot(res_hto_dup,aes(x=avg_log2FC,y=-log10(p_val_adj),col=p_val_adj<0.01&abs(avg_log2FC)>0.6))+
+#   geom_point()+
+#   facet_wrap("sample")+
+#   scale_color_manual(values = c("grey","red")) +
+#   theme_minimal() +
+#   theme(legend.position = "bottom")
+# 
+# library(VennDiagram)
+# 
+# degs_list<-split(res_hto_dup[p_val_adj<0.01&abs(avg_log2FC)>0.6]$gene,res_hto_dup[p_val_adj<0.01&abs(avg_log2FC)>0.6]$sample)
+# venn.diagram(degs_list,imagetype = "png",filename="outputs/think_tank_venn_hto_sign.png")
 
 #pseudo bulk replicats
 res_hto_dup<-fread("outputs/08-HTO_signature/res_pseudobulk_DESeq2_3replicates.csv")
 
-hto_signature<-res_hto_dup[padj<0.05&abs(log2FoldChange)>0.6]$gene
-length(hto_signature) #1291
+hto_signature<-res_hto_dup[padj<0.05&abs(log2FoldChange)>0.5]$gene
+length(hto_signature) #1518
 
-res_hto_dup[padj<0.05&log2FoldChange>0.6] 
-res_hto_dup[padj<0.05&abs(log2FoldChange)>0.6&gene%in%c("SOCS3","HES1","JUN","EGR1")]
+res_hto_dup[padj<0.05&log2FoldChange>0.5] 
+res_hto_dup[padj<0.05&abs(log2FoldChange)>0.5&gene%in%c("SOCS3","HES1","JUN","EGR1")]
 genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
                       "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",
                        "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC")
@@ -399,17 +387,25 @@ ggplot(res_hto_dup,aes(x=log2FoldChange,y=-log10(padj),col=padj<0.05&abs(log2Fol
   scale_color_manual(values = c("grey","red")) +
   theme_minimal() +
   theme(legend.position = "bottom")
-ggsave(fp(out,"2B-volcano_antibody_activation_signature.pdf"))
+ggsave("outputs/figures_epi_response/figure2/2B-volcano_antibody_activation_signature.pdf")
 
 
 #pathway activation of diff/prolif signaling
 library(clusterProfiler)
+library(org.Hs.eg.db)
 library(enrichplot)
 
-res_kegg<-readRDS("outputs/08-HTO_signature/res_hto_signature_kegg.rds")
-max(data.table(as.data.frame(res_kegg))$p.adjust)
+
+hto_sig_list<-list(up=bitr(res_hto_dup[padj<0.05&log2FoldChange>0.5]$gene,"SYMBOL","ENTREZID",OrgDb = org.Hs.eg.db)$ENTREZID,
+                   dn=bitr(res_hto_dup[padj<0.05&log2FoldChange<(-0.5)]$gene,"SYMBOL","ENTREZID",OrgDb = org.Hs.eg.db)$ENTREZID)
+res_hto_sig_kegg<-compareCluster(hto_sig_list, fun="enrichKEGG",
+                     organism="hsa", pvalueCutoff=1)
+
+res_hto_sig_kegg_dt<-data.table(as.data.frame(res_hto_sig_kegg))
+table(res_hto_sig_kegg_dt[p.adjust<0.1]$Cluster)
+res_hto_sig_kegg_dt[p.adjust<0.1&Cluster=="dn"]
 pdf(fp(out,"2Bsupp-kegg_enrichment_antibody_activation_signature.pdf"),width = 12)
-emapplot(pairwise_termsim(res_kegg,showCategory = 36),showCategory = 36)
+emapplot(pairwise_termsim(res_hto_sig_kegg),showCategory = 100)
 dev.off()
 
 pdf(fp(out,"2Bsupp-kegg_dotplot_antibody_activation_signature.pdf"),width = 12)
@@ -539,6 +535,8 @@ cor.test(res_hto_com[compa=="ctrl_hto"]$log2FoldChange,res_hto_com[compa=="lga_h
 
 signat_inter<-intersect(res_hto[compa=="ctrl_hto"&padj<0.05&log2FoldChange>0.6&gene%in%hto_signature]$gene,res_hto[compa=="lga_hto"&padj<0.05&log2FoldChange>0.6&gene%in%hto_signature]$gene)
 length(signat_inter) #269 / 283 DEGS LGA, /714 DEGs Ctrl
+
+
 res_hto_mat<-dcast(res_hto[gene%in%hto_signature],gene~compa,value.var ="log2FoldChange")
 head(res_hto_mat)
 res_hto_mat<-as.matrix(data.frame(res_hto_mat,row.names = "gene"))
@@ -610,7 +608,7 @@ res_lin[lineage=="HSC"&padj<0.05&abs(log2FoldChange)>0.6&log2FoldChange<0]#66 dn
 
 ggplot(res_lin[lineage=="HSC"],aes(x=log2FoldChange,y=-log10(padj),col=deg_sig))+
   geom_point()+
-   geom_label_repel(aes(label=ifelse(padj<0.05&abs(log2FoldChange)>0.6&gene%in%genes_of_interest,gene,"")),
+   geom_label_repel(aes(label=ifelse(padj<0.05&abs(log2FoldChange)>0.5&gene%in%genes_of_interest,gene,"")),
                    max.overlaps = 3000)+
   scale_color_manual(values = c("red","blue","grey")) +
   theme_minimal() +

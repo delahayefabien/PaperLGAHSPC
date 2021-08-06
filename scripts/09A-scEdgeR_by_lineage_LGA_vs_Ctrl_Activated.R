@@ -31,9 +31,9 @@ run_edgeRQLF <- function(counts,mtd.data,design,contrast) {
 
 Idents(cbps)<-"lineage_hmap"
 
-res_lin<-Reduce(rbind,mclapply(levels(cbps),function(lin){
+res_lin<-Reduce(rbind,lapply(levels(cbps),function(lin){
   cbps_sub<-subset(cbps,idents=lin)
-  
+  message("lin")
   #get and filter counts
   counts<-as.matrix(cbps_sub@assays$RNA@counts)
   counts<-counts[rowSums(counts>0)>=0.20*ncol(counts),]
@@ -58,7 +58,7 @@ res_lin<-Reduce(rbind,mclapply(levels(cbps),function(lin){
                     contrast=lga - ctrl)
   return(res[,lineage_hmap:=lin])
 
-  },mc.cores = 6))
+  }))
 
 fwrite(res_lin,fp(out,"res_scEdgeR_by_lineage.csv.gz"),sep = ";")
 
