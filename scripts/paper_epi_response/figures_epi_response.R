@@ -1,11 +1,47 @@
 
 source("scripts/utils/new_utils.R")
 out0<-"outputs/figures_epi_response"
+
+
+
+#figure 1 : Epigenetic Memory ####
 out<-fp(out0,"figure1")
 dir.create(out,recursive = T)
 
-#EPIGENETIC PROGRAMMING
-#figure 1
+#supp : PC plot et cohort
+#PC plot
+library(pheatmap)
+source("scripts/utils/methyl_utils.R")
+pval_cov<-fread("outputs/01-lga_vs_ctrl_limma_DMCs_analysis/pval_correl_covar_pcs.csv")
+
+pval_covf<-pval_cov[!covar%in%c("groupbatch_complexity_fac","seq.depth","library_complexity","group_complexity","groupbatch_complexity")]
+pval_covf[covar=="group_complexity_fac",covar:="library_complexity"]
+pca<-readRDS("outputs/01-lga_vs_ctrl_limma_DMCs_analysis/pca_lgactrl.rds")
+
+pval_mat<-as.matrix(data.frame(pval_covf,row.names = 1))
+
+pct.varPCs<-pctPC(pca,1:10)*100
+break_cols<-c(1,0.1,0.05,0.01,0.001,0.0001,0.00001)
+
+pdf(fp(out,"supp10-pcs_covars_plot.pdf"))
+pheatmap(-log10(pval_mat),cluster_cols = F,
+           labels_col= paste0("PC",1:10,"(",round(pct.varPCs[as.character(1:10)]),"%)"),
+           display_numbers = T,
+           color = colorRampPalette(c("white", "red"))(length(break_cols)+1),
+         breaks =sort(-log10(break_cols)))
+dev.off()
+
+#cohort
+res_coh<-fread("outputs/01-lga_vs_ctrl_limma_DMCs_analysis/res_limma_cohorts.tsv.gz")
+res_coh<-res_coh[compa=="C.L"]
+table(res_coh[adj.P.Val<=0.1,.(batch)])
+ggplot(res_coh)+
+  geom_point(aes(x=logFC,y=-log10(P.Value),col=P.Value<0.001&abs(logFC)>25),size=0.1)+
+  facet_wrap("batch")+
+  scale_color_manual(values = c("grey","red"))+
+  theme_minimal()
+ggsave(fp(out,"supp10-volcanos_limma_cohorts_C.L.pdf"),width = 12,height = 5)
+
 
 
 #1A : volcanoplot 
@@ -16,11 +52,63 @@ res[p_val_adj<0.05&abs(meth.change)>25] #43 DMCs
 res[p_val_adj<0.1&abs(meth.change)>25] #1255 DMCs
 res[p_val_adj<0.1&meth.change>25] #1250 DMCs
 
+res[p_val<0.001&abs(meth.change)>25] #4815 DMCs
+res[p_val<0.001&meth.change>25] #4787 
+4815-4787 
+#28 hypo
+cpgs<-fread("ref/all_HELP_tagging_cpgs_hg19_pos.csv")
+res<-merge(res,cpgs)
+fwrite(res[p_val<0.001&abs(meth.change)>25],fp(out,"supptabl2-res_limma_pval0.001_meth.change25.csv"))
+
 ggplot(res)+
-  geom_point(aes(x=meth.change,y=-log10(p_val),col=p_val_adj<0.1&abs(meth.change)>25),size=0.1)+
-  scale_color_manual(values = c("grey","red"))+theme_minimal()
-ggsave(fp(out,"1A-volcano_plot_hypermet_LGA.png"))
+  geom_point(aes(x=meth.change,y=-log10(p_val),col=p_val<0.001&abs(meth.change)>25),size=0.1)+
+  scale_color_manual(values = c("grey","red"))+scale_x_continuous(limits = c(-100,100))+theme_minimal()
 ggsave(fp(out,"1A-volcano_plot_hypermet_LGA.pdf"))
+
+#table : genescore, gene
+resg<-fread("outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
+fwrite(resg[,.(gene,gene_score_add,n.cpg.gene,n.cpg.sig.gene,chr,pos,pval,padj)],fp(out,"table-genes_methylation_genescore.csv"))
+summary(resg[n.cpg.sig.gene>3]$gene_score_add)
+
+#suppfig: valid genescore
+res_anno<-fread("outputs/02-gene_score_calculation_and_validation/res_anno.csv.gz")
+resg<-merge(resg,unique(res_anno[order(gene,pval)][,.(gene,chromatin_feature,ensembl_reg_score,in_eQTR)],by="gene"))
+res_mod<-summary(lm(gene_score_add~n.cpg.gene+n.cpg.sig.gene+pval+meth.change+chromatin_feature+ensembl_reg_score+in_eQTR+abs(tss_dist),data = resg)) #best gene_score_add than gene_score
+res_mod_dt<-data.table(covariate=rownames(res_mod$coefficient),pval=res_mod$coefficients[,4])
+ggplot(res_mod_dt[covariate!='(Intercept)'])+geom_col(aes(x=covariate,y=-log10(pval)))+scale_y_log10()
+ggsave(fp(out,"suppfig1-covariates_influence_on_genescore.pdf"))
+
+
+resg[,mlog10pval:=-log10(pval)]
+meth_scores<-melt(resg[,.SD,.SDcols=c("gene","gene_score_add","mlog10pval","meth.change")],id.vars = "gene",variable.name = "meth_metric",value.name = "score")
+meth_scores[score==Inf,score:=NA]
+meth_scores[score==-Inf,score:=NA]
+meth_scores<-meth_scores[!is.na(score)]
+res_de_cl<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_pseudobulkDESeq2_all_cbps.csv.gz")
+
+res_de_cl<-res_de_cl[!is.na(padj)]
+meth_scores_de<-merge(meth_scores,res_de_cl,by=c("gene"))
+unique(meth_scores_de[padj<0.05]$gene)#362 DEGS
+
+meth_scores_de[,score_scaled:=scale(score),by="meth_metric"]
+meth_scores_de$meth_metric<-factor(meth_scores_de$meth_metric,levels = c("mlog10pval","meth.change","gene_score_add"))
+ggplot(meth_scores_de)+
+  geom_boxplot(aes(fill=padj<0.05,y=score_scaled,x=meth_metric),outlier.shape = NA)+
+  coord_cartesian(ylim = c(-3,3))+
+  theme_classic()+
+  scale_fill_manual(values = c("white","grey"))
+ggsave(fp(out,"suppfig1-gene_score_pred_expression_change_compared_classical_metric.pdf"))
+
+meth_scores_de[,pval:=wilcox.test(score[padj<0.05],score[padj>=0.05])$p.value,by="meth_metric"]
+unique(meth_scores_de[,.(meth_metric,pval)],by="meth_metric")
+#       meth_metric         pval
+# 1: gene_score_add 0.0006818586
+# 2:     mlog10pval 0.0757731002
+# 3:    meth.change 0.0180098893
+
+ggplot(unique(meth_scores_de,by="meth_metric"))+geom_col(aes(y=-log10(pval),x=meth_metric))+
+  theme(axis.text.x = element_text(angle = 45,hjust = 1))
+
 
 #1B : pathway GSEA 
 library(enrichplot)
@@ -37,22 +125,49 @@ dotplot(res_go,x=gsea_go[order(p.adjust)]$gene_score.avg[1:40],showCategory=40)
 dev.off()
 
 #1C : TF motif enrichment
-#with own background
+#with own background no norm, 1000 perm
 res<-fread("outputs/03B-motif_analysis/knownResults.txt",
            select = c(1,2,3,5,6,7,8,9),
            col.names = c("motif","consensus","pval","padj","n_dmc_with_motif","pct_dmc_with_motif","n_background_with_motif","pct_background_with_motif"))
-res[padj<0.2]
+res[padj<0.05]
 res[,pct_dmc_with_motif:=as.numeric(str_remove(pct_dmc_with_motif,"%"))]
 res[,pct_background_with_motif:=as.numeric(str_remove(pct_background_with_motif,"%"))]
 res[,motif:=str_remove(motif,"/Homer")]
 res[,fold.enrichment:=pct_dmc_with_motif/pct_background_with_motif]
-ggplot(res[padj<=0.2&  n_dmc_with_motif>30][order(pval)])+geom_point(aes(x=motif,col=-log10(pval),size=fold.enrichment,y=n_dmc_with_motif))+
-  scale_x_discrete(limits=res[padj<=0.2&  n_dmc_with_motif>30][order(pval)]$motif)+
+ggplot(res[padj<=0.05&  n_dmc_with_motif>30][order(pval)])+geom_point(aes(x=motif,col=-log10(pval),size=fold.enrichment,y=n_dmc_with_motif))+
+  scale_x_discrete(limits=res[padj<=0.05&  n_dmc_with_motif>30][order(pval)]$motif)+
   theme_bw()+
-  theme(axis.text.x = element_text(angle = 70, hjust=1))
+  theme(axis.text.x = element_text(angle = 80, hjust=1))
 
-ggsave("outputs/figures_epi_response/figure1/1C-motif_enrichment_homer_own_background.pdf")
+ggsave(fp(out,"1C-motif_enrichment_homer_own_background.pdf"))
 
+res_perm<-fread("outputs/03B-motif_analysis/res_known_motif_all_perm_bgrandom.csv")
+res_perm[,motif:=str_remove(motif,"/Homer")]
+
+res[,permut:=0]
+res_perm_merge<-merge(res,res_perm,all=T)
+res_perm_merge[,p.perm:=sum(pct_dmc_with_motif[permut==0]<=pct_dmc_with_motif[permut!=0])/sum(permut!=0,na.rm = T),by=.(motif)]
+
+res_perm_merge[padj<=0.05&n_dmc_with_motif>30&p.perm<0.05&permut==0]
+res_perm_<-res_perm_merge[permut==0]
+
+res_perm_[padj<=0.05] #26
+res_perm_[padj<=0.05&n_dmc_with_motif>30] #26
+ #26
+res_perm_[padj<=0.05&n_dmc_with_motif>30&p.perm<0.01] #26
+
+ggplot(res_perm_[padj<=0.05&pct_dmc_with_motif>1&p.perm<0.01])+
+  geom_point(aes(x=motif,col=-log10(pval),size=fold.enrichment,y=n_dmc_with_motif))+
+  scale_color_gradient(high ="brown1" ,low = scales::muted("red"))+
+  scale_x_discrete(limits=res_perm_[padj<=0.05&pct_dmc_with_motif>1&p.perm<0.01][order(pval)]$motif)+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 80, hjust=1))
+
+ggsave(fp(out,"1C-motif_enrichment_homer_own_background_no_norm_padj0.05_pctDMC1_p.perm0.01.pdf"),height = 6.5)
+
+fwrite(res_perm_,fp(out,"1C-res_homer_own_background_no_norm_padj0.05_pctDMC1_p.perm0.01.csv"))
+
+res_perm_[p.perm<0.01] #32
 
 #supp : cohort validation 
 
@@ -132,12 +247,39 @@ print(pnet.obj[[1]]) #not informative so next
 
 
 
-#figure 2 :  ####
+#figure 2 : Hematomap ####
 source("scripts/utils/new_utils.R")
 library(Seurat)
 hmap<-readRDS("../singlecell/outputs/02-hematopo_datasets_integration/hematomap_ctrls_sans_stress/hematomap_ctrls_sans_stress.rds")
 out<-fp(out0,"figure2")
 dir.create(out)
+
+#table : number of cells / ech
+#basal
+#duplicates
+#hto
+
+#2A : UMAP 
+#rm cluster 18
+hmap<-subset(hmap,cell_type!="18")
+
+#reorder lineage levels
+Idents(hmap)<-"lineage"
+
+levels(hmap)<-c("LT-HSC",
+                "HSC",
+                "MPP/LMPP",
+                "Lymphoid",
+                "B cell",
+                "T cell",
+                "Erythro-Mas",
+                "Mk/Er",
+                "Myeloid",
+                "DC")
+hmap[["lineage"]]<-Idents(hmap)
+DimPlot(hmap,group.by = c("lineage"),label = T)
+ggsave("outputs/figures_epi_response/figure2/2A-hematomap.pdf")
+
 
 #2B: key genes/lin :
 DefaultAssay(hmap)<-"SCT"
@@ -165,6 +307,34 @@ wrap_plots(ps)
 ggsave(fp(out,"2supp-umap_key_genes_by_lin.pdf"),width = 12,height = 12)
 
 #supp : key genes /ct
+#reorder 
+Idents(hmap)<-"cell_type"
+levels(hmap)<-c("LT-HSC",
+                "HSC-1",
+                "HSC-2",
+                "HSC-3",
+                "HSC-4",
+                "MPP",
+                "LMPP",
+                "CLP",
+                "proB",
+                "B cell",
+                "T cell",
+               "MPP-Ery",
+               "EMP",
+               "EMP-cycle",
+               "ErP-cycle",
+               "Mk/Er",
+               "GMP",
+               "GMP-cycle",
+               "DC")
+hmap[["cell_type"]]<-Idents(hmap)
+
+#umap
+DimPlot(hmap,group.by = "cell_type",label = T)
+ggsave("outputs/figures_epi_response/figure2/suppfig2-umap_celltype.pdf")
+
+#key genes
 key_genes_ct<-c("ID1","ID2","DUSP2", #LT-HSC
            "EGR1","AVP", #HSC-1
          "CXCL8","ZFP36", #HSC-2
@@ -184,49 +354,16 @@ key_genes_ct<-c("ID1","ID2","DUSP2", #LT-HSC
            "MPO","AZU1", #GMP
          "CST3","CD83") #DC
 DotPlot(hmap,features = key_genes_ct,group.by = "cell_type")
-ggsave("outputs/figures_epi_response/figure2/2Bsupp-key_genes_by_celltype.pdf",width = 23)
+ggsave("outputs/figures_epi_response/figure2/supp-key_genes_by_celltype.pdf",width = 23)
 
-
-#figure 3 :  ####
-source("scripts/utils/new_utils.R")
-out<-fp(out0,"figure3")
-dir.create(out)
-#figure 4 :  ####
-source("scripts/utils/new_utils.R")
-out<-fp(out0,"figure4")
-dir.create(out)
-#figure 5 :  ####
-source("scripts/utils/new_utils.R")
-out<-fp(out0,"figure5")
-dir.create(out)
-#figure 6 :  ####
-source("scripts/utils/new_utils.R")
-out<-fp(out0,"figure6")
-dir.create(out)
-#figure 7 :  ####
-source("scripts/utils/new_utils.R")
-out<-fp(out0,"figure7")
-dir.create(out)
-
-
-
-
-
-#figure 3####
-#3A : stimulation sign across group
-
-#3B : LGA vs CTRL - activated condition
-
-
-
-#3supp : LGA vs CTRL - Basal condition
+#supp : LGA vs CTRL - Basal condition
 #same celltype distrib
 
 mtd<-fread("outputs/07-LGA_vs_Ctrl_Basal/metadata_basal.csv")
 
 ggplot(unique(mtd,by=c("sample","lineage_hmap")))+
   geom_boxplot(aes(x=lineage_hmap,y=pct.lin,fill=group))
-ggsave("outputs/figures_epi_response/figure2/2supp-distribution_lineage_control_lga_basal.pdf")
+ggsave(fp(out,"supp-distribution_lineage_control_lga_basal.pdf"))
 
 #no DEGs
 res_lin<-fread("outputs/07-LGA_vs_Ctrl_Basal/res_pseudobulkDESeq2_by_lineage.csv.gz")
@@ -236,7 +373,6 @@ res_lin$lineage<-factor(res_lin$lineage,levels = c("LT-HSC","HSC","MPP/LMPP","Ly
 genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
                       "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",
                        "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC")
-
 
 
 ggplot(res_lin[lineage%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")],
@@ -252,202 +388,156 @@ ggplot(res_lin[lineage%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","L
   scale_color_manual(values = c("grey","red")) +
   theme_minimal() +
   theme(legend.position = "bottom")
-ggsave("outputs/figures_epi_response/figure2/2supp-pseudo_bulk_deseq2_by_lineage_lga_vs_ctrl_basal.pdf")
+ggsave(fp(out,"supp-pseudo_bulk_deseq2_by_lineage_lga_vs_ctrl_basal.pdf"))
 
-#[to update]
-res_lin2<-fread("outputs/07-LGA_vs_Ctrl_Basal/res_scEdgeR_by_lineage.csv.gz")
-table(res_lin2[p_val_adj<0.001&abs(avg_logFC)>0.6]$lineage_hmap)
-   #   B cell          DC Erythro-Mas         HSC      LT-HSC    Lymphoid       Mk/Er 
-   #       26          20          26          84          14          24           2 
-   # MPP/LMPP     Myeloid      T cell 
-   #        9          38           2
 
-#volcano by lin
-genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
-                      "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",
-                       "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC")
+#figure 3 : LGA stimulation response   ####
+source("scripts/utils/new_utils.R")
+out<-fp(out0,"figure3")
+dir.create(out)
 
-ggplot(res_lin2[lineage_hmap%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")],aes(x=avg_logFC,y=-log10(p_val_adj),col=p_val_adj<0.11&abs(avg_logFC)>0.6))+
-  geom_point()+ 
-  geom_label_repel(aes(label = ifelse(p_val_adj<0.001&
-                                        abs(avg_logFC)>0.6&gene%in%genes_of_interest,gene,"")),
-                   max.overlaps = 5000,
-                   box.padding   = 0.35,
-                   point.padding = 0.5,
-                   segment.color = 'grey50')+
-  facet_wrap("lineage_hmap")+
-  scale_color_manual(values = c("grey","red")) +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-ggsave("outputs/figures_epi_response/figure2/2supp-sc_edger_by_lineage_lga_vs_ctrl_basal.pdf")
-
-split(res_lin2[p_val_adj<0.001&abs(avg_logFC)>0.6],res_lin2[p_val_adj<0.001&abs(avg_logFC)>0.6]$lineage_hmap)
-
-#2B : Ab activation signature all cbps####
-
-# #singlecell replicats 
-# res_hto_dup<-fread("../singlecell/outputs/03-HTOs_stimulation/duplicates/scdegs_hto_vs_not_wilcoxon.csv")
-# res_hto_dup[degs_in_3==T] #309
-# table(res_hto_dup[p_val_adj<0.01&abs(avg_log2FC)>0.6]$sample)
-# 
-# ggplot(res_hto_dup,aes(x=avg_log2FC,y=-log10(p_val_adj),col=p_val_adj<0.01&abs(avg_log2FC)>0.6))+
-#   geom_point()+
-#   facet_wrap("sample")+
-#   scale_color_manual(values = c("grey","red")) +
-#   theme_minimal() +
-#   theme(legend.position = "bottom")
-# 
-# library(VennDiagram)
-# 
-# degs_list<-split(res_hto_dup[p_val_adj<0.01&abs(avg_log2FC)>0.6]$gene,res_hto_dup[p_val_adj<0.01&abs(avg_log2FC)>0.6]$sample)
-# venn.diagram(degs_list,imagetype = "png",filename="outputs/think_tank_venn_hto_sign.png")
-
-#pseudo bulk replicats
+#supp : activation signature 
 res_hto_dup<-fread("outputs/08-HTO_signature/res_pseudobulk_DESeq2_3replicates.csv")
 
 hto_signature<-res_hto_dup[padj<0.05&abs(log2FoldChange)>0.5]$gene
 length(hto_signature) #1518
 
+fwrite(res_hto_dup[padj<0.05&abs(log2FoldChange)>0.5],fp(out,"table-stimulation_signature_genes.csv"))
+
 res_hto_dup[padj<0.05&log2FoldChange>0.5] 
 res_hto_dup[padj<0.05&abs(log2FoldChange)>0.5&gene%in%c("SOCS3","HES1","JUN","EGR1")]
-genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
+genes_of_interest<-c("SESN2","SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
                       "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",
                        "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC")
-#volcano
-ggplot(res_hto_dup,aes(x=log2FoldChange,y=-log10(padj),col=padj<0.05&abs(log2FoldChange)>0.6))+
+
+ggplot(res_hto_dup,aes(x=log2FoldChange,y=-log10(padj),col=padj<0.05&abs(log2FoldChange)>0.5))+
   geom_point()+
-  geom_label_repel(aes(label=ifelse(padj<0.05&abs(log2FoldChange)>0.6&gene%in%genes_of_interest,gene,"")),
+  geom_label_repel(aes(label=ifelse(padj<0.05&abs(log2FoldChange)>0.5&gene%in%genes_of_interest,gene,"")),
                    max.overlaps = 3000)+
   scale_color_manual(values = c("grey","red")) +
   theme_minimal() +
   theme(legend.position = "bottom")
-ggsave("outputs/figures_epi_response/figure2/2B-volcano_antibody_activation_signature.pdf")
+ggsave(fp(out,"supp-volcano_antibody_activation_signature_3_ctrl_same_samples.pdf"))
 
 
-#pathway activation of diff/prolif signaling
+#supp : pathway activation 
 library(clusterProfiler)
 library(org.Hs.eg.db)
 library(enrichplot)
 
+res_gsea_sig<-readRDS("outputs/08-HTO_signature/res_hto_signature_gsea_kegg.rds")
 
-hto_sig_list<-list(up=bitr(res_hto_dup[padj<0.05&log2FoldChange>0.5]$gene,"SYMBOL","ENTREZID",OrgDb = org.Hs.eg.db)$ENTREZID,
-                   dn=bitr(res_hto_dup[padj<0.05&log2FoldChange<(-0.5)]$gene,"SYMBOL","ENTREZID",OrgDb = org.Hs.eg.db)$ENTREZID)
-res_hto_sig_kegg<-compareCluster(hto_sig_list, fun="enrichKEGG",
-                     organism="hsa", pvalueCutoff=1)
+res_gsea_sig_dt<-data.table(as.data.frame(res_gsea_sig))
+res_gsea_sig_dt[p.adjust<0.05]
 
-res_hto_sig_kegg_dt<-data.table(as.data.frame(res_hto_sig_kegg))
-table(res_hto_sig_kegg_dt[p.adjust<0.1]$Cluster)
-res_hto_sig_kegg_dt[p.adjust<0.1&Cluster=="dn"]
-pdf(fp(out,"2Bsupp-kegg_enrichment_antibody_activation_signature.pdf"),width = 12)
-emapplot(pairwise_termsim(res_hto_sig_kegg),showCategory = 100)
+pdf(fp(out,"supp-emapplot_pathways_activation_signature_kegg_gsea_padj0.05_070821.pdf"),width = 12)
+emapplot(pairwise_termsim(res_gsea_sig),showCategory = 65)
 dev.off()
 
-pdf(fp(out,"2Bsupp-kegg_dotplot_antibody_activation_signature.pdf"),width = 12)
-dotplot(res_kegg,showCategory = 20)
+pdf(fp(out,"supp-dotplot_pathways_activation_signature_kegg_gsea_top20_070821.pdf"),width = 12)
+dotplot(res_gsea_sig,showCategory = 20)
 dev.off()
 
-res_go<-readRDS("outputs/08-HTO_signature/res_go.rds")
+res_or_sig_up<-fread("outputs/08-HTO_signature/res_hto_signature_kegg_up.csv")
 
-pdf(fp(out,"2Bsupp-go_enrichment_antibody_activation_signature.pdf"),width = 12)
-emapplot(pairwise_termsim(res_go,showCategory = 41),showCategory = 41)
-dev.off()
-
-pdf(fp(out,"2Bsupp-go_dotplot_antibody_activation_signature.pdf"),width = 12)
-dotplot(res_go,showCategory = 20)
-dev.off()
-
-#change in subpop 
-mtd<-fread("outputs/06-integr_singlecell_cbps/metadata_cbps_filtered.csv.gz")
-mtd$lineage_hmap<-factor(mtd$lineage_hmap,levels = c("LT-HSC","HSC","MPP/LMPP","Lymphoid","B cell","T cell","Erythro-Mas","Mk/Er","Myeloid","DC"))
-mtd_dup<-mtd[sample%in%c("ctrlM555","ctrlM518","ctrlM537")]
-
-#=> unexpectdly HSC enrichment after hto stim 
- #due to what ?
-#see 2B-supp 
-#=> due to MPP / EMP ++ stress response through mito ++ activation donc remove during QC filtering
+fwrite(res_or_sig_up[p.adjust<0.1],fp(out,"supp-table_pathway_enrichment_hto_signature_up_padj0.1.csv"))
 
 
-#2Supp signature by lineage####
+#supp : signature by lineage
 #nDEGs
 res_hto_lin<-fread("outputs/08-HTO_signature/by_lineage/res_pseudobulk_DESeq2_3replicates.csv.gz")
-table(res_hto_lin[padj<0.05&abs(log2FoldChange)>0.6]$lineage)#1184
-  # B cell          DC Erythro-Mas         HSC      LT-HSC    Lymphoid    MPP/LMPP     Myeloid 
-  #        51         109         160        1184          16          76         281         207 
+table(res_hto_lin[padj<0.05&abs(log2FoldChange)>0.5]$lineage)#1184
+    # B cell          DC Erythro-Mas         HSC 
+    #      51         109         161        1264 
+    #  LT-HSC    Lymphoid    MPP/LMPP     Myeloid 
+    #      14          61         341         188 
 
-res_hto_lin[,pct.degs:=sum(padj<0.05&abs(log2FoldChange)>0.6,na.rm=T)/.N,by="lineage"]
+res_hto_lin[,pct.degs:=sum(padj<0.05&abs(log2FoldChange)>0.5&gene%in%hto_signature,na.rm=T)/length(intersect(hto_signature,gene)),by="lineage"]
 
-res_hto_lin[,n.genes:=.N,by="lineage"]
-res_hto_lin[,n.degs:=sum(padj<0.05&abs(log2FoldChange)>0.6,na.rm=T),by="lineage"]
+res_hto_lin[,n.genes:=length(intersect(hto_signature,gene)),by="lineage"]
+res_hto_lin[,n.degs:=sum(padj<0.05&abs(log2FoldChange)>0.5&gene%in%hto_signature,na.rm=T),by="lineage"]
 
 res_hto_linf<-unique(res_hto_lin[,.(lineage,n.genes,n.degs,pct.degs)])
 
 ?chisq.test
-chisq.test(res_hto_linf$n.degs,p=res_hto_linf$n.genes, rescale.p = T)
+chisq.test(res_hto_linf$n.degs,p=res_hto_linf$n.genes, rescale.p = T) 
 chisq.test(res_hto_linf$n.degs,p=res_hto_linf$n.genes/sum(res_hto_linf$n.genes)) # p-value < 2.2e-16
 
-chisq.test(res_hto_linf$pct.degs)
 
-rep(1/length(res_hto_linf$pct.degs), length(res_hto_linf$pct.degs))
+res_hto_lin[lineage=="HSC"&padj<0.05&abs(log2FoldChange)>0.5&gene%in%hto_signature] #796/1518
 
-res_hto_lin[lineage=="HSC"&padj<0.05&abs(log2FoldChange)>0.6&gene%in%hto_signature] #712/1184
+ggplot(res_hto_lin[padj<0.05&abs(log2FoldChange)>0.5])+geom_bar(aes(x=lineage,fill=lineage))+theme_minimal()
+ggsave(fp(out,"supp-n_degs_by_lineage_3ctrl_stimulation.pdf"))
 
-ggplot(res_hto_lin[padj<0.05&abs(log2FoldChange)>0.6])+geom_bar(aes(x=lineage,fill=lineage))+theme_minimal()
-ggsave(fp(out,"2B-n_degs_by_lineage_antibody_activation.pdf"))
+ggplot(res_hto_lin[padj<0.05&abs(log2FoldChange)>0.5&gene%in%hto_signature])+geom_bar(aes(x=lineage,fill=lineage))+theme_minimal()
+ggsave(fp(out,"supp-n_degs_of_hto_stim_by_lineage_3ctrl_stimulation.pdf"))
 
 #heatmap 
 library(pheatmap)
-res_hto_all<-rbind(res_hto_lin,fread("outputs/08-HTO_signature/res_pseudobulk_DESeq2_3replicates.csv")[,lineage:="all_cbps"])
+res_hto_all<-rbind(res_hto_lin,fread("outputs/08-HTO_signature/res_pseudobulk_DESeq2_3replicates.csv")[,lineage:="all_cbps"],fill=T)
 
 res_hto_mat<-dcast(res_hto_all[gene%in%hto_signature&lineage%in%c("all_cbps","LT-HSC","HSC","MPP/LMPP","Lymphoid","Myeloid","Erythro-Mas")],gene~lineage,value.var ="log2FoldChange")
 head(res_hto_mat)
 res_hto_mat<-as.matrix(data.frame(res_hto_mat,row.names = "gene"))
 head(res_hto_mat)
-res_hto_mat[is.na(res_hto_mat)]<-0
+res_hto_matf<-res_hto_mat[!rowSums(is.na(res_hto_mat))==1,]#removing degs just in all cbps
+res_hto_matf[is.na(res_hto_matf)]<-0
 
-pdf("outputs/figures_epi_response/figure2/2Bsupp_heatmap_antibody_activation_signature_by_lineage_no_scaling.pdf")
-break_cols<-c(-30:0/10,1:30*2/10)
-pheatmap(res_hto_mat,show_rownames = F,na_col = "grey",
+
+pdf(fp(out,"supp-heatmap_activation_signature_by_lineage_3ctrls_no_scaling.pdf"))
+break_cols<-c(-30:0/10,1:30*1.25/10)
+pheatmap(res_hto_matf,show_rownames = F,na_col = "grey",
          color = colorRampPalette(c("darkblue","white", "red"))(length(break_cols)+1),
          breaks =break_cols )
 dev.off()
 
-res_hto_mat_scaled<-t(scale(t(res_hto_mat),center = F))
-pdf("outputs/figures_epi_response/figure2/2Bsupp_heatmap_antibody_activation_signature_by_lineage.pdf")
-pheatmap(res_hto_mat_scaled[,c(7,2:6,1)],cluster_cols = F,show_rownames = F,na_col = "grey")
+res_hto_mat_scaled<-t(scale(t(res_hto_matf),center = F))
+pdf(fp(out,"supp-heatmap_activation_signature_by_lineage_3ctrls_scaled.pdf"))
+pheatmap(res_hto_mat_scaled[,],cluster_cols = T,show_rownames = F,na_col = "grey")
 dev.off()
 
+#supp - all compa by lineages 
+res_lin_all<-Reduce(rbind,list(fread("outputs/08-HTO_signature/pseudobulk_DESeq2_ctrl_hto/res_pseudobulkDESeq2_by_lineage.csv.gz")[,compa:="ctrl_hto"],
+                           fread("outputs/08-HTO_signature/pseudobulk_DESeq2_lga_hto/res_pseudobulkDESeq2_by_lineage.csv.gz")[,compa:="lga_hto"],
+                           fread("outputs/09-LGA_vs_Ctrl_Activated/res_pseudobulkDESeq2_by_lineage.csv.gz")[,compa:="lga_vs_ctrl_hto"]
+))
+res_lin_all<-res_lin_all[lineage%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")]
 
-#signature enrichment by lineage 
-source("scripts/utils/new_utils.R")
-res_sign_kegg<-fread("outputs/08-HTO_signature/by_lineage/res_hto_signature_kegg_by_lineage.csv")
+res_lin_all$lineage<-factor(res_lin_all$lineage,levels = c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid"))
+res_lin_all[padj<0.05&abs(log2FoldChange)>0.5,deg_sig:="deg"]
 
-res_sign_kegg[,n.enriched:=Count]
-res_sign_kegg[,n_gene_set:=as.numeric(str_extract(BgRatio,"^[0-9]+"))]
-res_sign_kegg[,pct.enriched:=n.enriched/n_gene_set]
-ggplot(res_sign_kegg[lineage%in%c("HSC","MPP/LMPP","Erythro-Mas","Lymphoid","Myeloid")&p.adjust<0.05])+
-  geom_point(aes(x=Description,y=pct.enriched,size=n.enriched,col=-log10(p.adjust)))+
-  facet_grid(~lineage,scales = "free_x",space = "free")+
-  theme(axis.text.x = element_text(angle = 60,vjust =1,hjust = 1))
-ggsave("outputs/figures_epi_response/figure2/2Bsupp-kegg_dotplot_antibody_activation_signature_by_lineage.pdf")
+res_lin_all[padj<0.05&abs(log2FoldChange)>0.5&gene %in% hto_signature,deg_sig:="deg_hto"]
+res_lin_all[is.na(deg_sig),deg_sig:="other_gene"]
+
+#ctrl
+ggplot(res_lin_all[compa=="ctrl_hto"],aes(x=log2FoldChange,y=-log10(padj),col=deg_sig))+
+  geom_point(size=0.6)+
+  facet_wrap("lineage")+
+  scale_color_manual(values = c("red","orange","grey")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+ggsave(fp(out,"suppfig5A-volcano_degs_hto_sign_ctrl_stim_vs_ctrl_steady_state.pdf"))
+
+#lga
+ggplot(res_lin_all[compa=="lga_hto"],aes(x=log2FoldChange,y=-log10(padj),col=deg_sig))+
+  geom_point(size=0.6)+
+  facet_wrap("lineage")+
+  scale_color_manual(values = c("red","orange","grey")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+ggsave(fp(out,"suppfig5B-volcano_degs_hto_sign_lga_stim_vs_lga_steady_state.pdf"))
+
+#lga ctrl
+ggplot(res_lin_all[compa=="lga_vs_ctrl_hto"],aes(x=log2FoldChange,y=-log10(padj),col=deg_sig))+
+  geom_point(size=0.6)+
+  facet_wrap("lineage")+
+  scale_color_manual(values = c("red","orange","grey")) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+ggsave(fp(out,"suppfig5C-volcano_degs_hto_sign_lga_stim_vs_ctrl_stim.pdf"))
 
 
-
-res_sign_go_list<-readRDS("outputs/08-HTO_signature/by_lineage/res_hto_signature_go_bp_by_lineage.rds")
-res_sign_go<-Reduce(function(x,y)rbind(x,y,fill=TRUE),lapply(names(res_sign_go_list), function(lin)data.table(as.data.frame(res_sign_go_list[[lin]]))[,lineage:=lin]))
-
-res_sign_go[,n.enriched:=Count]
-res_sign_go[,n_gene_set:=as.numeric(str_extract(BgRatio,"^[0-9]+"))]
-res_sign_go[,pct.enriched:=n.enriched/n_gene_set]
-res_sign_go[,top10:=p.adjust<=max(sort(p.adjust)[1:10],na.rm = T),by="lineage"]
-ggplot(res_sign_go[top10==T&lineage%in%c("HSC","MPP/LMPP","Erythro-Mas","Lymphoid","Myeloid")&p.adjust<0.05])+
-  geom_point(aes(x=Description,y=pct.enriched,size=n.enriched,col=-log10(p.adjust)))+
-  facet_grid(~lineage,scales = "free_x",space = "free")+
-  theme(axis.text.x = element_text(angle = 66,vjust =1,hjust = 1))
-ggsave("outputs/figures_epi_response/figure2/2Bsupp-go_dotplot_antibody_activation_signature_by_lineage.pdf")
-
-
-#2C LGA vs ctrl activation difference####
-# heatmap difference allcbps
+#3A : stimulation sign across group
 library(pheatmap)
 
 res_hto<-Reduce(rbind,list(fread("outputs/08-HTO_signature/pseudobulk_DESeq2_ctrl_hto/res_all_cbps_de_analysis.csv")[,compa:="ctrl_hto"],
@@ -463,12 +553,12 @@ wilcox.test(rank(res_hto[compa=="ctrl_hto"]$log2FoldChange),rank(res_hto[compa==
 
 cor(res_hto_com[compa=="ctrl_hto"]$log2FoldChange,res_hto_com[compa=="lga_hto"]$log2FoldChange,method = "spearman")
 cor.test(res_hto_com[compa=="ctrl_hto"]$log2FoldChange,res_hto_com[compa=="lga_hto"]$log2FoldChange,method="spearman")
+# p-value < 2.2e-16, rho = 0.70
 
 
 
-
-signat_inter<-intersect(res_hto[compa=="ctrl_hto"&padj<0.05&log2FoldChange>0.6&gene%in%hto_signature]$gene,res_hto[compa=="lga_hto"&padj<0.05&log2FoldChange>0.6&gene%in%hto_signature]$gene)
-length(signat_inter) #269 / 283 DEGS LGA, /714 DEGs Ctrl
+signat_inter<-intersect(res_hto[compa=="ctrl_hto"&padj<0.05&log2FoldChange>0.5&gene%in%hto_signature]$gene,res_hto[compa=="lga_hto"&padj<0.05&log2FoldChange>0.5&gene%in%hto_signature]$gene)
+length(signat_inter) #328 / 372 DEGS LGA, /686 DEGs Ctrl
 
 
 res_hto_mat<-dcast(res_hto[gene%in%hto_signature],gene~compa,value.var ="log2FoldChange")
@@ -476,68 +566,69 @@ head(res_hto_mat)
 res_hto_mat<-as.matrix(data.frame(res_hto_mat,row.names = "gene"))
 head(res_hto_mat)
 
-pdf("outputs/figures_epi_response/figure2/2Ca-heatmap_antibody_activation_signature_by_group.pdf",width = 3)
+pdf(fp(out,"3a-heatmap_antibody_activation_signature_by_group_all_cbps.pdf"),width = 3,height = 6)
 
 pheatmap(res_hto_mat,cluster_cols = F,show_rownames = F,
          color = colorRampPalette(c("darkblue","white", "red"))(42),
          breaks = breakRes<-c(-20:0/10,1:20*2/10))
 dev.off()
 
-#volcano by lin
-genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
-                      "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",
-                       "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC")
 
-ggplot(res_lin[lineage%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")],aes(x=log2FoldChange,y=-log10(padj),col=padj<0.11&abs(log2FoldChange)>0.6))+
-  geom_point()+ 
-  geom_label_repel(aes(label = ifelse(padj<0.1&
-                                        abs(log2FoldChange)>0.6&gene%in%genes_of_interest,gene,"")),
-                   max.overlaps = 5000,
-                   box.padding   = 0.35,
-                   point.padding = 0.5,
-                   segment.color = 'grey50')+
-  facet_wrap("lineage")+
-  scale_color_manual(values = c("grey","red")) +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-ggsave("outputs/figures_epi_response/figure2/2Cb-pseudo_bulk_deseq2_by_lineage_lga_vs_ctrl_activated.pdf")
+#same with HSC
+res_hto_hsc<-Reduce(rbind,list(fread("outputs/08-HTO_signature/pseudobulk_DESeq2_ctrl_hto/res_pseudobulkDESeq2_by_lineage.csv.gz")[lineage=="HSC"][,compa:="ctrl_hto"],
+                           fread("outputs/08-HTO_signature/pseudobulk_DESeq2_lga_hto/res_pseudobulkDESeq2_by_lineage.csv.gz")[lineage=="HSC"][,compa:="lga_hto"],
+                           fread("outputs/09-LGA_vs_Ctrl_Activated/res_pseudobulkDESeq2_by_lineage.csv.gz")[lineage=="HSC"][,compa:="lga_vs_ctrl_hto"]
+))
+res_hto_com<-res_hto_hsc[compa%in%c('ctrl_hto','lga_hto')]
+res_hto_com<-res_hto_com[gene%in%gene[duplicated(gene)]]
+res_hto_com<-res_hto_com[order(gene)]
+wilcox.test(rank(res_hto[compa=="ctrl_hto"]$log2FoldChange),rank(res_hto[compa=="lga_hto"]$log2FoldChange))
 
-# heatmap for all lineage
+
+cor(res_hto_com[compa=="ctrl_hto"]$log2FoldChange,res_hto_com[compa=="lga_hto"]$log2FoldChange,method = "spearman")
+cor.test(res_hto_com[compa=="ctrl_hto"]$log2FoldChange,res_hto_com[compa=="lga_hto"]$log2FoldChange,method="spearman")
+# p-value < 2.2e-16, rho = 0.65
+
+
+signat_inter<-intersect(res_hto_hsc[compa=="ctrl_hto"&padj<0.05&log2FoldChange>0.5&gene%in%hto_signature]$gene,res_hto_hsc[compa=="lga_hto"&padj<0.05&log2FoldChange>0.5&gene%in%hto_signature]$gene)
+length(signat_inter) #154 / 182 DEGS LGA, /490 DEGs Ctrl
+
+
+res_hto_mat<-dcast(res_hto_hsc[gene%in%hto_signature&!is.na(log2FoldChange)],gene~compa,value.var ="log2FoldChange")
+res_hto_mat<-as.matrix(data.frame(res_hto_mat,row.names = "gene"))
+res_hto_mat<-res_hto_mat[rowSums(is.na(res_hto_mat))==0,]
+head(res_hto_mat)
+
+pdf(fp(out,"3a-heatmap_antibody_activation_signature_by_group_hsc.pdf"),width = 3,height = 6)
+
+pheatmap(res_hto_mat,cluster_cols = F,show_rownames = F,
+         color = colorRampPalette(c("darkblue","white", "red"))(42),
+         breaks = breakRes<-c(-20:0/10,1:20*2/10))
+
+dev.off()
+
+
+
+#3B : LGA vs CTRL - activated condition 
 res_lin<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_pseudobulkDESeq2_by_lineage.csv.gz")
+res_lin[padj<0.05&abs(log2FoldChange)>0.5,deg_sig:="deg"]
 
-res_lin_mat<-dcast(res_lin[lineage%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")&gene%in%hto_signature],gene~lineage,value.var ="log2FoldChange")
-
-res_lin_mat<-as.matrix(data.frame(res_lin_mat,row.names = "gene"))
-head(res_lin_mat)
-
-res_lin_mat[is.na(res_lin_mat)]<-0
-pheatmap(res_lin_mat,show_rownames = F,
-         color = colorRampPalette(c("darkblue","white", "red"))(62),
-         breaks = breakRes<-c(-30:30/10))
-ggsave(fp(out,"2Cb-pheatmap_LGA_vs_Ctrl_activation_response_by_lineage.pdf"))
-
-
-#volcano LGA CTRL HTO HSC
-
-res_lin[padj<0.05&abs(log2FoldChange)>0.6,deg_sig:="deg"]
-
-res_lin[padj<0.05&abs(log2FoldChange)>0.6&gene %in% hto_signature,deg_sig:="deg_hto"]
+res_lin[padj<0.05&abs(log2FoldChange)>0.5&gene %in% hto_signature,deg_sig:="deg_hto"]
 res_lin[is.na(deg_sig),deg_sig:="other_gene"]
 
-
-table(res_lin[padj<0.05&abs(log2FoldChange)>0.6]$lineage)
-# Erythro-Mas         HSC    Lymphoid       Mk/Er    MPP/LMPP     Myeloid 
-#           1          86          35           2          24          36
-
-
-res_lin[lineage=="HSC"&padj<0.05&log2FoldChange<0]  #72
+table(res_lin[padj<0.05&abs(log2FoldChange)>0.5]$lineage)
+     # B cell          DC Erythro-Mas         HSC    Lymphoid    MPP/LMPP     Myeloid      T cell 
+     #     64           5          30         373           7         311          42           1 
 
 
-res_lin[lineage=="HSC"&padj<0.05&abs(log2FoldChange)>0.6&log2FoldChange>0]#20 upreg
+res_lin[lineage=="HSC"&padj<0.05&abs(log2FoldChange)>0.5&log2FoldChange>0]#88 upreg
 #dont KLF3 qui represse KLF1 pour rentrer en differentiation vers Erythroid (https://journals.asm.org/doi/full/10.1128/MCB.00173-12 )
 #et CYTOR, qui promeut proliferation
 
-res_lin[lineage=="HSC"&padj<0.05&abs(log2FoldChange)>0.6&log2FoldChange<0]#66 dnreg
+res_lin[lineage=="HSC"&padj<0.05&abs(log2FoldChange)>0.5&log2FoldChange<0]#285 dnreg
+
+res_hsc<-res_lin[lineage=="HSC"&padj<0.05&abs(log2FoldChange)>0.5]
+fwrite(res_hsc,fp(out,"table-res_LGA_vs_ctrl_hsc_activated_padj0.05_logFC0.5.csv"))
 
 
 ggplot(res_lin[lineage=="HSC"],aes(x=log2FoldChange,y=-log10(padj),col=deg_sig))+
@@ -548,11 +639,37 @@ ggplot(res_lin[lineage=="HSC"],aes(x=log2FoldChange,y=-log10(padj),col=deg_sig))
   theme_minimal() +
   theme(legend.position = "bottom")
 
-ggsave("outputs/figures_epi_response/figure2/2Cb-volcano_LGA_vs_Ctrl_HSC_activation_response_signature_highlight.pdf")
+ggsave(fp(out,"3b-volcano_LGA_vs_Ctrl_HSC_activation_response_signature_highlight.pdf"))
+
+#supp pathways HSC up and dn  
+library(clusterProfiler)
+library(enrichplot)
+library(org.Hs.eg.db)
+
+res_hsc<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_kegg.csv")
+res_hsc[p.adjust<0.1]
+fwrite(res_hsc[p.adjust<0.1],fp(out,"supp-pathway_enrichment_LGA_HSC_activated_padj0.1.csv"))
+
+res_hsc_up<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_kegg_up.csv")
+res_hsc_up[p.adjust<0.1]
+fwrite(res_hsc_up[p.adjust<0.1],fp(out,"supp-pathway_enrichment_LGA_HSC_activated_up_padj0.1.csv"))
+
+res_hsc_dn<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_kegg_dn.csv")
+res_hsc_dn[p.adjust<0.1]
+fwrite(res_hsc_dn[p.adjust<0.1],fp(out,"supp-table_pathway_enrichment_LGA_HSC_activated_dn_padj0.1.csv"))
+
+res_hsc_dn[,size.pathway:=as.numeric(str_extract(BgRatio,"^[0-9]+"))]
+res_hsc_dn[,pct.overlap:=Count/size.pathway]
 
 
+ggplot(res_hsc_dn[p.adjust<0.1])+geom_point(aes(x=Description,y=pct.overlap,size=Count,col=p.adjust))+
+  scale_x_discrete(limits=res_hsc_dn[p.adjust<0.1][order(p.adjust)]$Description)+
+  scale_color_continuous(trans="log10")+scale_color_gradient(low = "cyan",high = "darkblue")+
+  theme(axis.text.x = element_text(angle = 75,hjust = 1))
+ggsave(fp(out,"suppfig6-table_pathway_enrichment_LGA_HSC_activated_dn_padj0.1.pdf"),height = 7)
 
-#sc 
+
+#supp : sc [to update]
 res_lin_act_sc<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_scEdgeR_by_lineage.csv.gz")
 res_lin_act_sc[p_val_adj<0.001&abs(avg_logFC)>0.6&lineage_hmap=="HSC"]
 
@@ -588,208 +705,108 @@ ggplot(res_lin_act_sc[lineage_hmap=="HSC"],aes(x=avg_logFC,y=-log10(p_val_adj),c
 ggsave("outputs/figures_epi_response/figure2/2D-volcano_LGA_vs_Ctrl_sc_HSC_activation_response_signature_highlight.pdf")
 res_lin_act_sc[p_val_adj<0.001&abs(avg_logFC)>0.6&lineage_hmap=="HSC"]
 
-#2D : pathways HSC up and dn  ####
-library(clusterProfiler)
-library(enrichplot)
-library(org.Hs.eg.db)
 
 
-kegg_dn<-enrichKEGG(bitr(res_lin[lineage=="HSC"&padj<0.05&log2FoldChange<(-0.6)]$gene,fromType = "SYMBOL",
-                             toType = "ENTREZID",OrgDb = org.Hs.eg.db)$ENTREZID,
-                 organism = "hsa",pvalueCutoff = 1)
-kegg_dn_dt<-data.table(as.data.frame(kegg_dn))
-#kegg_dn<-readRDS("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_kegg_dn_padj0.2.rds")
-#kegg_dn_dt<-fread("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_kegg_dn_padj0.2.csv")
-kegg_dn_dt[p.adjust<0.1]
-emapplot(pairwise_termsim(kegg_dn,showCategory = 44),showCategory = 44)
-ggsave("outputs/2E-emmaplot_kegg_dn_padj0.2.pdf")
-
-
-go_mf_up<-readRDS("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_go_mf_up.rds")
-go_mf_up_dt<-fread("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_go_mf_up.csv.gz")
-go_mf_up_dt[p.adjust<0.15]
-emapplot(pairwise_termsim(go_mf_up,showCategory = 32),showCategory = 32)
-ggsave(fp(out,"2E-emmaplot_go_mf_up.pdf"))
-
-
-
-go_mf_dn<-readRDS("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_go_mf_dn.rds")
-go_mf_dn_dt<-fread("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_go_mf_dn.csv.gz")
-go_mf_dn_dt[p.adjust<0.15]
-emapplot(pairwise_termsim(go_mf_dn,showCategory = 20),showCategory = 20)
-ggsave(fp(out,"2E-emmaplot_go_mf_dn.pdf"))
-
-
-go_bp_dn<-readRDS("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_go_bp_dn.rds")
-go_bp_dn_dt<-fread("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_go_bp_dn.csv.gz")
-go_bp_dn_dt[p.adjust<0.05]
-emapplot(pairwise_termsim(go_bp_dn,showCategory = 36),showCategory = 36)
-ggsave(fp(out,"2E-emmaplot_go_bp_dn.pdf"))
-
-go_bp_up<-readRDS("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_go_bp_up.rds")
-go_bp_up_dt<-fread("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_go_bp_up.csv.gz")
-go_bp_up_dt[p.adjust<0.2]
-emapplot(pairwise_termsim(go_bp_up,showCategory = 36),showCategory = 36)
-ggsave(fp(out,"2E-emmaplot_go_bp_dn.pdf"))
-
-#=>same differentiation signalling affected than methylation, 
-#+ methyltranferaqe activity upreg in HSC LGA
-#programmation of activation response ?
-
-#2E : correlation with Methylation HSC ####
-
-#sc HSC
-meth_res<-fread("outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
-meth_res[,gs_z:=(gene_score_add - mean(gene_score_add))/sd(gene_score_add)]
-hsc_act_res<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_scEdgeR_by_lineage.csv.gz")[lineage_hmap=="HSC"]
-res_int<-merge(meth_res[,.(gene,gene_score_add)],hsc_act_res)
-res_int[p_val_adj<0.001]
-#pval diff 
-ggplot(res_int,aes(x=p_val_adj<0.001,y=gene_score_add))+
-  geom_boxplot(aes(fill=p_val_adj<0.001),size=0.5,alpha=0.6,outlier.shape = NA)+
-  coord_cartesian(ylim = c(0,1700))+
-  theme_classic()
-
-wilcox.test(res_int[p_val_adj<0.001]$gene_score_add,res_int[p_val_adj>0.001]$gene_score_add)
-#p= 0.001042
-ggsave("outputs/figures_epi_response/figure2/2E-gene_score_diff_LGA_vs_Ctrl_sc_HSC_activated_DEGs_padj0.001.pdf")
-
-
-#pseudo_bulk HSC
+#figure 4 : Correl Meth - Expr  ####
+source("scripts/utils/new_utils.R")
+out<-fp(out0,"figure4")
+dir.create(out)
+#4A : hypermethylation  HSC activated DEGs 
 hsc_act_res_pseudo<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_pseudobulkDESeq2_by_lineage.csv.gz")[lineage=="HSC"]
+meth_res<-fread("outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
 res_int_pseudo<-merge(meth_res[,.(gene,gene_score_add,pval_gs)],hsc_act_res_pseudo)
-res_int_pseudo[padj<0.05&abs(log2FoldChange)>0.6] #68
+res_int_pseudo[padj<0.05&abs(log2FoldChange)>0.5] #293
 res_int_pseudo[is.na(padj),padj:=1]
 
-#pval diff 
-ggplot(res_int_pseudo,aes(x=padj<0.05&abs(log2FoldChange)>0.6,y=gene_score_add))+
-  geom_boxplot(aes(fill=padj<0.05&abs(log2FoldChange)>0.6),size=0.5,alpha=0.6,outlier.shape = NA)+
-  scale_fill_manual(values = c("grey","red"))+
-  coord_cartesian(ylim = c(0,1700))+
-  theme_classic()
-
-wilcox.test(res_int_pseudo[padj<0.05&abs(log2FoldChange)>0.6]$gene_score_add,res_int_pseudo[padj>0.05|abs(log2FoldChange)<0.6]$gene_score_add)
-
-#p= 0.0003819
-
-
-#keep pseudobulk, compared degs in hto signature
-res_int_pseudo[padj<0.1&abs(log2FoldChange)>0.5,deg_sig:="deg"]
-res_int_pseudo[padj<0.1&abs(log2FoldChange)>0.5&gene %in% hto_signature,deg_sig:="deg_hto"]
+res_int_pseudo[padj<0.05&abs(log2FoldChange)>0.5,deg_sig:="deg"]
+res_int_pseudo[padj<0.05&abs(log2FoldChange)>0.5&gene %in% hto_signature,deg_sig:="deg_hto"]
 res_int_pseudo[is.na(deg_sig),deg_sig:="non_deg"]
 table(res_int_pseudo$deg_sig)
-    # deg deg_hto non_deg 
-    #  27      41    8889 
+   # deg deg_hto non_deg 
+   #  256     180    8780 
 res_int_pseudo$deg_sig<-factor(res_int_pseudo$deg_sig,levels = c('non_deg',"deg","deg_hto"))
 
-#geom_point
-
-genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
-                      "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",
-                       "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC","SESN2")
-
-ggplot(res_int_pseudo,aes(x=log2FoldChange,y=gene_score_add,col=deg_sig))+
-  geom_point(aes(alpha=deg_sig))+
-    geom_label_repel(aes(label=ifelse(padj<0.05&gene_score_add>300&gene%in%genes_of_interest,gene,"")),
-                   max.overlaps = 3000)+
-  scale_color_manual(values = c("grey","red","blue"))+
-  coord_cartesian(ylim = c(0,2500))+
-  theme_classic()
-
-ggsave("outputs/figures_epi_response/figure2/2E-gene_score_correl.pdf")
-
-res_int_pseudo[deg_sig!="non_deg"&gene_score_add>500] #27/72
-quantile(res_int_pseudo$gene_score_add,0.8)
-
-#test asso deg-meth
 ggplot(res_int_pseudo,aes(x=deg_sig,y=gene_score_add))+
   geom_boxplot(aes(fill=deg_sig),size=0.5,alpha=0.6,outlier.shape = NA)+
   scale_fill_manual(values = c("grey","red","blue"))+
   coord_cartesian(ylim = c(0,1700))+
   theme_classic()
-ggsave("outputs/figures_epi_response/figure2/2E-gene_score_boxplot.pdf")
+ggsave(fp(out,"4A-gene_score_boxplot.pdf"))
 
 wilcox.test(res_int_pseudo[deg_sig=="non_deg"]$gene_score_add,res_int_pseudo[deg_sig=="deg"]$gene_score_add)
-#not sig
+#p-value = 0.02839
 
 wilcox.test(res_int_pseudo[deg_sig=="non_deg"]$gene_score_add,res_int_pseudo[deg_sig=="deg_hto"]$gene_score_add)
-#p-value = 0.0001312
+#p-value = 1.766e-07
 
 wilcox.test(res_int_pseudo[deg_sig=="deg_hto"]$gene_score_add,res_int_pseudo[deg_sig=="deg"]$gene_score_add)
-#p <0.05
+#p-value = 0.0106
 
 
-ggplot(res_int_pseudo,aes(x=deg_sig,y=gene_score_add))+
-  geom_boxplot(aes(fill=deg_sig),size=0.5,alpha=0.6,outlier.shape = NA)+
-  coord_cartesian(ylim = c(0,1700))+
+#4B : volcano plot correl meth - gene expression
+genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
+                      "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",
+                       "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC","SESN2")
+
+
+ggplot(res_int_pseudo,aes(x=log2FoldChange,y=gene_score_add,col=deg_sig))+
+  geom_point(aes(alpha=deg_sig))+
+    geom_label_repel(aes(label=ifelse(padj<0.05&abs(log2FoldChange)>0.5&gene_score_add>200&gene%in%genes_of_interest,gene,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","red","blue"))+
+  coord_cartesian(ylim = c(0,3500))+
   theme_classic()
-wilcox.test(res_int_pseudo[deg_sig=="deg"]$gene_score_add,res_int_pseudo[deg_sig=="deg_hto"]$gene_score_add)
-#not sig
 
-#correl 
-ggplot(res_int_pseudo)+geom_point(aes(x=log2FoldChange,y=log(gene_score_add),col=deg_sig,alpha=deg_sig))
+ggsave(fp(out,"4B-plot_gene_score_degs_lga_hsc_activated.pdf"))
+       
+ggplot(res_int_pseudo,aes(x=log2FoldChange,y=log(gene_score_add),col=deg_sig))+
+  geom_point(aes(alpha=deg_sig))+
+    geom_label_repel(aes(label=ifelse(padj<0.05&abs(log2FoldChange)>0.5&gene_score_add>200&gene%in%genes_of_interest,gene,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","red","blue"))+
+  coord_cartesian(ylim = c(0.00001,8))+
+  theme_classic()
 
-ggplot(res_int_pseudo)+geom_point(aes(x=log2FoldChange,y=gene_score_add,col=deg_sig,alpha=deg_sig))
-
-ggplot(res_int_pseudo)+geom_point(aes(x=log2FoldChange,y=gene_score_add,col=gene %in% hto_signature,alpha=gene %in% hto_signature))
-
-res_int_pseudo[,hto_sign:=gene %in% hto_signature]
-
-summary(lm(abs(log2FoldChange)~gene_score_add,data =res_int_pseudo ))#p=5.69e-06, r2 =0.0022 
-
-summary(lm(abs(log2FoldChange)~gene_score_add,data =res_int_pseudo[hto_sign==F] )) #p=0.0155 r2 =0.0006078 
-
-summary(lm(abs(log2FoldChange)~gene_score_add,data =res_int_pseudo[hto_sign==T] )) #0.000124, r2= 0.01535
-
-summary(lm(abs(log2FoldChange)~gene_score_add,data =res_int_pseudo[padj<0.05&abs(log2FoldChange)>0.6] )) #p=0.7
-summary(lm(abs(log2FoldChange)~gene_score_add,data =res_int_pseudo[deg_sig=="deg_hto"] )) #p=0.9
+ggsave(fp(out,"4B-plot_gene_score_degs_lga_hsc_activated_log.pdf"))
 
 
-ggplot(res_int_pseudo)+geom_point(aes(x=abs(log2FoldChange)*(-log10(pvalue)+1),y=gene_score_add,col=gene %in% hto_signature,alpha=gene %in% hto_signature))
-
-res_int_pseudo[,gene_score_fac:=factor(sapply(gene_score_add,function(x)sum(x>quantile(gene_score_add,c(0.25,0.5,0.75)))+1))]
-
-ggplot(res_int_pseudo)+geom_boxplot(aes(y=abs(log2FoldChange)*(-log10(pvalue)+1),fill=gene_score_fac,x=gene %in% hto_signature),outlier.shape = NA)+
-  coord_cartesian(ylim = c(0,3.5))+theme_minimal()
-
-ggplot(res_int_pseudo)+geom_boxplot(aes(y=abs(log2FoldChange)*(-log10(pvalue)+1),x=gene_score_fac),outlier.shape = NA)+coord_cartesian(ylim = c(0,2))
-
-#GSEA sign
-
-library(fgsea)
-gs_rank<-rank(res_int_pseudo$gene_score_add)
-names(gs_rank)<-res_int_pseudo$gene
-res_hto_sign_in_meth<-fgseaSimple(pathways = list(hto_sign=hto_signature),
-            stats=gs_rank,nperm = 1000,scoreType = "pos")
-
-res_hto_sign_in_meth #p=0.021
-
-res_int_pseudo[,deg_score:=abs(log2FoldChange)*(-log10(pvalue)+1)]
-deg_rank<-rank(res_int_pseudo$deg_score)
-names(deg_rank)<-res_int_pseudo$gene
-res_hto_sign_in_degs<-fgseaSimple(pathways = list(hto_sign=hto_signature),
-            stats=deg_rank,nperm = 1000,scoreType = "pos")
-
-res_hto_sign_in_degs #p=0.00099900
-
-#overlap genes
-genes_activ_meth_de<-intersect(res_hto_sign_in_meth$leadingEdge[[1]],res_hto_sign_in_degs$leadingEdge[[1]])
-genes_activ_meth_de
-length(genes_activ_meth_de) #224
-length(res_hto_sign_in_meth$leadingEdge[[1]]) #485
-length(res_hto_sign_in_degs$leadingEdge[[1]]) #409
-length(hto_signature) #1291/8957 genes
+#supp : sc HSC [to update]
+meth_res<-fread("outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
+hsc_act_res<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_scEdgeR_by_lineage.csv.gz")[lineage_hmap=="HSC"]
+res_int<-merge(meth_res[,.(gene,gene_score_add)],hsc_act_res)
+res_int[p_val_adj<0.001]
 
 
-#figure3 :####
-out0<-"outputs/figures_epi_response/"
-out<-fp(out0,"figure3")
+#figure 5 : SCENIC  ####
+source("scripts/utils/new_utils.R")
+out<-fp(out0,"figure5")
 dir.create(out)
-#3A : Heatmap TF by celltype => STAT3, JUN, EGR1 HSC-1 specific ####
-cbps<-readRDS("../singlecell/outputs/cbps0_8.rds")
-cbps<-subset(cbps,lineage_hmap!="18"&group%in%c("ctrl","lga")&ambigous==F&orig.ident!="cd34_hto1_0C1I1L")
 
+cbps<-readRDS("outputs/10-SCENIC/cbps_with_regulons_activity.rds")
 
+#supp : heatmap regulon by lin
+regul_lin <- sapply(split(colnames(cbps), cbps@meta.data$lineage_hmap),
+                                     function(cells) {
+                                       if(length(cells)>1){
+                                         return(rowMeans(as.matrix(cbps@assays$TF_AUC@data)[,cells]))
+                                       }else if (length(cells)==1){
+                                         return(cbps@assays$TF_AUC@data[,cells])
+                                           }else return(NA)
+
+                                       })
+regul_lin_scaled<-t(scale(t(regul_lin), center = T, scale=T))
+
+regul_lin_dt<-melt(regul_lin_scaled)
+colnames(regul_lin_dt)<-c("regulon","lineage","relative_activity")
+regul_lin_dt<-data.table(regul_lin_dt)
+
+regul_lin_dt[,top15:=relative_activity>=sort(relative_activity,decreasing = T)[15],by='lineage']
+
+pdf(fp(out,"3A-heatmap_top15_tf_by_lineage.pdf"),width = 20,height = 5)
+ComplexHeatmap::Heatmap(t(regul_lin_scaled[unique(regul_lin_dt[top15==T]$regulon),unique(cbps$lineage_hmap[!cbps$differentiated])]), name="Regulon activity")
+dev.off()
+
+#supp: Heatmap TF by celltype [to update]
 
 regul_ct <- sapply(split(colnames(cbps), cbps@meta.data$cell_type_hmap),
                                      function(cells) {
@@ -808,83 +825,55 @@ regul_ct_dt<-data.table(regul_ct_dt)
 
 regul_ct_dt[,top15:=relative_activity>=sort(relative_activity,decreasing = T)[15],by='cell_type']
 
-
-pdf(fp(out,"3A-heatmap_top15_tf_by_cell_type.pdf"),width = 8,height = 20)
+pdf(fp(out,"5A-heatmap_top15_tf_by_cell_type.pdf"),width = 8,height = 20)
 ComplexHeatmap::Heatmap(regul_ct_scaled[unique(regul_ct_dt[top15==T]$regulon),], name="Regulon activity")
 dev.off()
 
-#by lin
-regul_lin <- sapply(split(colnames(cbps), cbps@meta.data$lineage_hmap),
-                                     function(cells) {
-                                       if(length(cells)>1){
-                                         return(rowMeans(as.matrix(cbps@assays$SCENIC@data)[,cells]))
-                                       }else if (length(cells)==1){
-                                         return(cbps@assays$SCENIC@data[,cells])
-                                           }else return(NA)
+#regulons list
+regulons_list<-readRDS("../singlecell/outputs/05-SCENIC/cbps0-8_clean/regulons_list.rds")
+regulons_df<-Reduce(rbind,lapply(names(regulons_list), function(tf)data.table(term=tf,gene=regulons_list[[tf]])))
+fwrite(regulons_df,fp(out,"table-regulons_list.csv"))
 
-                                       })
-regul_lin_scaled<-t(scale(t(regul_lin), center = T, scale=T))
+#5A : TF activity alteration
 
-regul_lin_dt<-melt(regul_lin_scaled)
-colnames(regul_lin_dt)<-c("regulon","lineage","relative_activity")
-regul_lin_dt<-data.table(regul_lin_dt)
+res_tf_diff<-fread("outputs/10-SCENIC/regulon_activity_lga_vs_ctrl_HTO_by_lineage.csv.gz")
 
-regul_lin_dt[,top15:=relative_activity>=sort(relative_activity,decreasing = T)[15],by='lineage']
+fwrite(res_tf_diff[p_val_adj<0.001&abs(avg_log2FC)>0.05&lineage=="HSC"&hto==T],fp(out,"supptabl6-res_tf_activity_alteration_lga_stim_hsc_padj0.001_avg_log2FC0.05.csv"))
 
-pdf(fp(out,"3A-heatmap_top15_tf_by_lineage.pdf"),width = 6,height = 18)
-ComplexHeatmap::Heatmap(regul_lin_scaled[unique(regul_lin_dt[top15==T]$regulon),], name="Regulon activity")
-dev.off()
-
-
-DefaultAssay(cbps)<-"SCENIC"
-FeaturePlot(cbps,c("STAT3","EGR1","JUN","FOSB"),min.cutoff = 0.2,max.cutoff = "q95")
-ggsave(fp(out,"3A2-umap_key_tf_activity_in_hsc.pdf"))
-
-
-#03Asupp- heatmap ct_sample cluster bien ct entre eux ? [to finish]
-cbps$lineage_hmap_sample<-paste(cbps$lineage_hmap,cbps$sample,sep="_")
-regul_lin_sample <- sapply(split(colnames(cbps), cbps@meta.data$lineage_hmap_sample),
-                                     function(cells) {
-                                       if(length(cells)>1){
-                                         return(rowMeans(as.matrix(cbps@assays$SCENIC@data)[,cells]))
-                                       }else if (length(cells)==1){
-                                         return(cbps@assays$SCENIC@data[,cells])
-                                           }else return(NA)
-
-                                       })
-
-regul_lin_sample_scaled <- t(scale(t(regul_lin_sample), center = T, scale=T))
-ComplexHeatmap::Heatmap(regul_lin_scaled, name="Regulon activity",
-                        top_annotation ="" #to finish
-                        show_row_names = F,show_column_names = F)
-
-
-#3B: TF activity bias of STAT3 and JUN ? ####
-
-res_tf_diff<-fread("../singlecell/outputs/05-SCENIC/cbps0-8_clean/regulon_activity_lga_vs_ctrl_HTO_by_lineage.csv.gz")
-  
 res_tf_diff[,auc_change:=avg_log2FC]
-table(res_tf_diff[p_val_adj<0.001&abs(avg_log2FC)>0.05]$lineage)
-
-
+table(res_tf_diff[p_val_adj<0.001&abs(avg_log2FC)>0.05]$lineage,res_tf_diff[p_val_adj<0.001&abs(avg_log2FC)>0.05]$hto)
+  #            FALSE TRUE
+  # B cell          0   10
+  # Erythro-Mas     2    0
+  # HSC             1    7
+  # Lymphoid        0   22
+  # MPP/LMPP        1    4
+  # Myeloid         0    4
 plot(density(res_tf_diff$avg_log2FC))
 abline(v=-0.05)
 res_tf_diff[p_val_adj<0.001&lineage=="HSC"&abs(avg_log2FC)>0.05]
-res_tf_diff[p_val_adj<0.001&lineage=="HSC"&abs(avg_log2FC)>0.05]$regulon
 
 
-ggplot(res_tf_diff[p_val_adj<0.001&lineage=="HSC"&abs(avg_log2FC)>0.05])+geom_col(aes(x=regulon,y=auc_change,fill=-log10(p_val_adj)))
-ggsave(fp(out,"3B1-barplot_top7_tf_change_hsc_lga_vs_ctrl.pdf"))
+ggplot(res_tf_diff[p_val_adj<0.001&lineage=="HSC"&abs(avg_log2FC)>0.05&hto==T])+
+  geom_col(aes(x=regulon,y=auc_change,fill=-log10(p_val_adj)))+
+ scale_x_discrete(limits = res_tf_diff[p_val_adj<0.001&lineage=="HSC"&abs(avg_log2FC)>0.05&hto==T][order(p_val_adj)]$regulon)
 
-cbps<-readRDS("../singlecell/outputs/cbps0_8.rds")
-cbps<-subset(cbps,group%in%c("ctrl","lga")&batch!="cbp1"&ambigous==F)
+ggsave(fp(out,"5a-barplot_tf_change_hsc_lga_vs_ctrl.pdf"))
+
 mtd<-data.table(cbps@meta.data,keep.rownames = "cell")
-tfs_alt<-res_tf_diff[p_val_adj<0.001&lineage=="HSC"&abs(avg_log2FC)>0.05]$regulon
-tf_alt_act<-data.table(t(as.matrix(cbps@assays$SCENIC@data[tfs_alt,])),keep.rownames = "cell")
+tfs_alt<-res_tf_diff[p_val_adj<0.001&lineage=="HSC"&abs(avg_log2FC)>0.05&hto==T]$regulon
+tf_alt_act<-data.table(t(as.matrix(cbps@assays$TF_AUC@data[tfs_alt,])),keep.rownames = "cell")
 tf_alt_act<-melt(tf_alt_act,id.vars = "cell",variable.name ="regulon",value.name = "activity" )
 tf_alt_act<-merge(tf_alt_act,mtd)
 ggplot(tf_alt_act[lineage_hmap=="HSC"&hto==T])+
   geom_boxplot(aes(x=regulon,y=activity,fill=group))+theme_bw()
+ggsave(fp(out,"5a-boxplot_tf_activity_change_padj0.001_logFC0.05_lga_hsc_activated.pdf"))
+
+ggplot(tf_alt_act[lineage_hmap=="HSC"&regulon!="KLF2e"])+
+  geom_boxplot(aes(x=hto,y=activity,fill=group))+facet_wrap("regulon")+theme_bw()
+ggsave(fp(out,"5a-boxplot_tf_activity_change_padj0.001_logFC0.05_lga_hsc_activated_vs_not.pdf"))
+
+
 
 for(tf in tfs_alt){
   print(tf)
@@ -896,174 +885,733 @@ for(tf in tfs_alt){
 tf_alt_act[,activated:=activity>activ.thr]
 tf_alt_act[,pct.activ:=sum(activated)/.N,,by=.(sample_hto,lineage_hmap,regulon)]
 
-ggplot(tf_alt_act[lineage_hmap=="HSC"&regulon!="KLF2e"])+
+tf_alt_actl<-unique(tf_alt_act,by=c("sample_hto",'lineage_hmap',"regulon"))
+ggplot(tf_alt_actl[lineage_hmap=="HSC"&regulon!="KLF2e"])+
   geom_boxplot(aes(x=hto,y=pct.activ,fill=group))+facet_wrap("regulon")+theme_minimal()
-ggsave(fp(out,"3B2-boxplot_pct_activ_tf_of_interest_by_sample_hsc.pdf"))
+ggsave(fp(out,"5a-boxplot_pct_activ_tf_of_interest_by_sample_hsc.pdf"))
 
+stat_hsc<-tf_alt_actl[lineage_hmap=="HSC"&regulon!="KLF2e"][,pvalue:=wilcox.test(pct.activ[group=="lga"],pct.activ[group=="ctrl"])$p.value,by=.(hto,regulon)]
 
-tf_int_dt_mtsl[,pvalue:=wilcox.test(pct.activ[group=="lga"],pct.activ[group=="ctrl"])$p.value,by=.(regulon,hto,lineage_hmap)]
-tf_int_dt_mtsl[pvalue<0.1]
-unique(tf_int_dt_mtsl[pvalue<0.2],by=c("regulon","lineage_hmap","hto"))[,.(regulon,hto,lineage_hmap,pvalue)]
-#    regulon   hto lineage_hmap     pvalue
-# 1:  ARID5A FALSE          HSC 0.18065268
-# 2:    EGR1  TRUE          HSC 0.10789211
-# 3:     JUN  TRUE          HSC 0.18115218
-# 4:    FOSB  TRUE          HSC 0.14185814
-# 5:  ARID5A  TRUE          HSC 0.05927406
+unique(stat_hsc,by=c("hto","regulon"))[,.(regulon,hto,pvalue)]
 
+#     regulon   hto     pvalue
+#  1:  ARID5A FALSE 0.62820513
+#  2:    EGR1 FALSE 0.44522145
+#  3:    FOSB FALSE 1.00000000
+#  4:    KLF4 FALSE 0.62820513
+#  5:    KLF2 FALSE 0.83566434
+#  6:     JUN FALSE 0.44522145
+#  7:  ARID5A  TRUE 0.05927406
+#  8:    EGR1  TRUE 0.18115218
+#  9:    FOSB  TRUE 0.18115218
+# 10:    KLF4  TRUE 0.10789211
+# 11:    KLF2  TRUE 0.14185814
+# 12:     JUN  TRUE 0.28238428
 
-#old :
-
-tf_int_dt_mtd<-fread("../singlecell/outputs/05-SCENIC/cbps0-8_clean/activated_tf_of_interest_by_cells.csv.gz")
-unique(tf_int_dt_mtd$regulon)
-tf_int_dt_mtsl<-unique(tf_int_dt_mtd[lineage_hmap=="HSC"],by=c("sample_hto","lineage_hmap","regulon"))
-
-ggplot(tf_int_dt_mtsl[lineage_hmap=="HSC"])+
-  geom_boxplot(aes(x=hto,y=pct.activ,fill=group))+facet_wrap("regulon")
-ggsave(fp(out,"3B2-boxplot_pct_activ_tf_of_interest_by_sample_hsc.pdf"))
-
-
-tf_int_dt_mtsl[,pvalue:=wilcox.test(pct.activ[group=="lga"],pct.activ[group=="ctrl"])$p.value,by=.(regulon,hto,lineage_hmap)]
-tf_int_dt_mtsl[pvalue<0.1]
-unique(tf_int_dt_mtsl[pvalue<0.2],by=c("regulon","lineage_hmap","hto"))[,.(regulon,hto,lineage_hmap,pvalue)]
-#    regulon   hto lineage_hmap     pvalue
-# 1:  ARID5A FALSE          HSC 0.18065268
-# 2:    EGR1  TRUE          HSC 0.10789211
-# 3:     JUN  TRUE          HSC 0.18115218
-# 4:    FOSB  TRUE          HSC 0.14185814
-# 5:  ARID5A  TRUE          HSC 0.05927406
-
-
-#3C: regulons epigenetically affected 
-
-res_gsea<-fread("outputs/07-regulons_enrichment_genescore/res_gsea_genescore_regulons.csv.gz")
-dt_gsea<-data.table(as.data.frame(res_gsea))
-dt_gsea[padj<0.001]$pathway
-dt_gsea[padj<0.01&NES>1.6]$pathway
-
+#5B : Regulons epigenetic programming
+res_gsea<-fread("outputs/11-regulons_enrichment_genescore/res_gsea_genescore_regulons_hiconf.csv.gz")
 res_gsea[,regulon:=pathway]
-res_gsea[regulon=="EGR1"]
-head(res_gsea[order(padj)]$pathway,100)
+res_gsea[,pct.enrich:=size/size.regulon]
 
-regulons_ord<-res_gsea[padj<=sort(padj)[25]][order(padj)]$regulon
-ggplot(res_gsea[padj<=sort(padj)[25]])+geom_col(aes(x=regulon,y=-log10(padj),fill=NES))+scale_x_discrete(limits=regulons_ord)
-ggsave("outputs/figures_epi_response/figure3/3C1-barplot_gsea_regulons_genescore_top25_padj.pdf")
+gs_enrich_regulons<-res_gsea[padj<0.005&NES>1.6]$regulon #38
 
+res_gseaf<-res_gsea[regulon%in%gs_enrich_regulons]
 
-regulons_ord<-res_gsea[NES>=sort(NES,decreasing = T)[20]][order(NES,decreasing = T)]$regulon
-ggplot(res_gsea[NES>=sort(NES,decreasing = T)[20]])+geom_col(aes(x=regulon,y=-log10(padj),fill=NES))+scale_x_discrete(limits=regulons_ord)
-ggsave("outputs/figures_epi_response/figure3/3C1-barplot_gsea_regulons_genescore_top20_NES.pdf")
-
-res_gseaf<-res_gsea[!str_detect(regulon,"e$")]
-regulons_ord<-res_gseaf[padj<=sort(padj)[20]][order(padj)]$regulon
-ggplot(res_gseaf[padj<=sort(padj)[20]])+geom_col(aes(x=regulon,y=-log10(padj),fill=NES))+scale_x_discrete(limits=regulons_ord)
-ggsave("outputs/figures_epi_response/figure3/3C1-barplot_gsea_regulons_hiconf_genescore_top20_padj.pdf")
-
-
-res_or<-fread("outputs/07-regulons_enrichment_genescore/res_or_genescore150_regulons.csv.gz")
-res_or[regulon=="EGR1"]
-
-ggplot(res_or[padj<0.001&!str_detect(regulon,"e$")])+
-  geom_point(aes(x=regulon,y=pct.enriched,size=regulon.size,col=-log10(padj)))+
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 9),
-        axis.title=element_text(size=12,face="bold"))
-ggsave("outputs/figures_epi_response/figure3/3C2-dotplot_or_regulons_hiconf_genescore150_padj0.001.pdf")
-
-ggplot(res_or[order(padj)][1:20,])+
-  geom_point(aes(x=regulon,y=pct.enriched,size=regulon.size,col=-log10(padj)))+
-  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1,size = 9),
-        axis.title=element_text(size=12,face="bold"))
-ggsave("outputs/figures_epi_response/figure3/3C2-dotplot_or_regulons_genescore150_top20.pdf")
-
-res_orf<-res_or[!str_detect(regulon,"e$")]
-
-#=> JUN /STAT3 /EGR1 pathway activation epigenetically altered,
-#which genes exactly ?
-#3D correl degs - genescore
-res_hsc<-fread("../singlecell/outputs/04-HSC_stimulation_response_lga_vs_ctrl/pseudobulk_deseq2/res_HSC_de_analysis.csv")
-res_met<-fread("outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
-plot(density(res_met$gene_score_add))
-abline(v=150)
-
-res_hsc_met<-merge(res_hsc,res_met,by="gene")
-res_hsc_met[gene%in%genes_to_highlight]
-
-
-ggplot(res_hsc_met[padj.x<0.2],aes(x=log2FoldChange,y=gene_score_add,col=gene_score_add>150&abs(log2FoldChange)>0.6))+geom_point()+  
-  geom_label_repel(aes(label=ifelse(gene_score_add>150&abs(log2FoldChange)>0.6&gene%in%genes_to_highlight,gene,"")),
-                   max.overlaps = 3000)+
-  scale_color_manual(values = c("grey","blue","gold"))+
-  theme(legend.position = "bottom")
-
-
-ggsave("outputs/figures_epi_response/figure3/3C-plot_correl_lgavsctrl_hsc_activated_degs_meth_gene_score.pdf")
-
-res_hsc_met[padj.x<0.2&abs(log2FoldChange)>0.6&gene_score_add>150,deg_meth_sig:="deg_meth"]
-res_hsc_met[padj.x<0.2&abs(log2FoldChange)>0.6&gene_score_add>150&gene %in% hto_signature,deg_meth_sig:="deg_meth_hto"]
-res_hsc_met[is.na(deg_meth_sig),deg_meth_sig:="other_gene"]
-
-ggplot(res_hsc_met[padj.x<0.2],aes(x=log2FoldChange,y=gene_score_add,col=deg_meth_sig))+geom_point()+  
-  geom_label_repel(aes(label=ifelse(gene_score_add>150&abs(log2FoldChange)>0.6&gene%in%genes_to_highlight,gene,"")),max.overlaps = 3000)+
-  scale_color_manual(values = c("blue","orange","grey"))+theme_minimal()+
-  theme(legend.position = "bottom")
-ggsave("outputs/figures_epi_response/figure3/3C-plot_correl_lgavsctrl_hsc_activated_degs_meth_gene_score_hto_signature_highlight.pdf")
+regulons_ord<-res_gseaf[order(padj)]$pathway
+ggplot(res_gseaf)+geom_point(aes(x=regulon,y=pct.enrich,col=-log10(padj),size=size.regulon))+
+  scale_x_discrete(limits=regulons_ord)+
+  theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5))
+ggsave(fp(out,"5B-dotplot_gsea_regulons_genescore_padj0.005_NES1.6.pdf"))
 
 
 
-#INFLUENCE ON DIFF/PROLIF ####
-#figure4 
-dir.create("outputs/figures_epi_response/figure4/")
-#4A: cell pop switch####
-cbps<-readRDS("../singlecell/outputs/cbps0_8.rds")
-DimPlot(cbps,group.by = "cell_type_int",label = T)
-cbps$lineage_int<-sapply(as.character(cbps$cell_type_int),function(ct)ifelse(ct%in%c("HSC-1","HSC-2","MkP"),"HSC",
-                                                               ifelse(ct%in%c("EMP","Ba/Eo/MasP","ErP"),"Erythro-Mas",
-                                                                      ifelse(ct%in%c("GMP-1","GMP-2"),"Myeloid",
-                                                                             ifelse(ct%in%c("CLP","proB"),"Lymphoid",ct)))))
-DimPlot(cbps,group.by = "lineage_int",label = T)
+#5C : Regulatory Network epigenetic programming
+res_gsea_cl<-readRDS("outputs/11-regulons_enrichment_genescore/res_gsea_genescore_regulon_non_extended_clusterprofiler.rds")
+res_gsea_cl_dt<-data.table(as.data.frame(res_gsea_cl))
+res_gsea_cl_dt[p.adjust<0.05&NES>1.6]
+res_gsea_cl_sub = res_gsea_cl[res_gsea_cl$p.adjust<0.05&res_gsea_cl$NES>1.6, asis=T]
+
+pdf(fp(out,"5c-emapplot_gsea_genescore_regulon_clusterprofiler_padj0.005_NES1.6.pdf"),width=14,height=8)
+
+emapplot(pairwise_termsim(res_gsea_cl_sub,showCategory = 33),showCategory = 33)
+
+dev.off()
+#5D : Regulatory network Expression alteration
+
+res_gsea_cl_stem_net = res_gsea_cl_sub[res_gsea_cl_sub$ID%in%c("ATF3","FOS","JUNB","KLF2","FOSB","JUN","EGR1","JUND","KLF10","KLF4","ARID5A"), asis=T]
+class(res_gsea_cl_stem_net)
+
+res_degs<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_pseudobulkDESeq2_by_lineage.csv.gz")[lineage=="HSC"]
+fold_changes<-res_degs$log2FoldChange
+names(fold_changes)<-res_degs$gene
+
+fold_changes_1<-fold_changes
+fold_changes_1[fold_changes_1<(-1)]<- (-1)
+fold_changes_1[fold_changes_1>(1)]<-1
+pdf(fp(out,"5d-cnetplot_gsea_genescore_stemness_regulons_network_FoldChange_genes_highlight.pdf"),width=10,height=6)
+
+cnetplot(res_gsea_cl_stem_net,showCategory = 11,
+         foldChange = fold_changes_1,cex_category=0.8,cex_label_category=0.8,
+         node_label = "category",
+         )+scale_color_gradient2(limits=c(-max(abs(fold_changes_1)),max(abs(fold_changes_1))),
+                                 high = scales::muted("red"),low =scales::muted("blue"))
+dev.off()
+
+
+
+fold_changes<-res_degs[padj<0.05]$log2FoldChange
+names(fold_changes)<-res_degs[padj<0.05]$gene
+
+fold_changes_bin<-fold_changes
+fold_changes_bin[fold_changes_bin<0]<- (-1)
+fold_changes_bin[fold_changes_bin>0]<-1
+
+pdf(fp(out,"5d-cnetplot_gsea_genescore_stemness_regulons_network_DEGs_padj0.05_highlight.pdf"),width=10,height=6)
+
+cnetplot(res_gsea_cl_stem_net,showCategory = 11,
+         foldChange = fold_changes_bin,cex_category=0.8,cex_label_category=0.8,
+         node_label = "category",
+         )
+dev.off()
+
+fold_changes<-res_degs[padj<0.05&abs(log2FoldChange)>0.5]$log2FoldChange
+names(fold_changes)<-res_degs[padj<0.05&abs(log2FoldChange)>0.5]$gene
+
+fold_changes_bin<-fold_changes
+fold_changes_bin[fold_changes_bin<0]<- (-1)
+fold_changes_bin[fold_changes_bin>0]<-1
+
+pdf(fp(out,"5d-cnetplot_gsea_genescore_stemness_regulons_network_DEGs_padj0.05_lFC0.5_highlight.pdf"),width=10,height=6)
+
+cnetplot(res_gsea_cl_stem_net,showCategory = 11,
+         foldChange = fold_changes_bin,cex_category=0.8,cex_label_category=0.8,
+         node_label = "category",
+         )
+dev.off()
+
+#with label
+pdf(fp(out,"5d-cnetplot_gsea_genescore_stemness_regulons_network_FoldChange_label_genes.pdf"),width=14,height=8)
+cnetplot(res_gsea_cl_stem_net,showCategory = 11,
+         foldChange = fold_changes_bin,cex_category=0.8,cex_label_category=0.8,cex_label_gene=0.5,
+         node_label = "gene",
+         )+scale_color_gradient2(limits=c(-max(abs(fold_changes_1)),max(abs(fold_changes_1))),
+                                 high = scales::muted("red"),low =scales::muted("blue"))
+dev.off()
+
+
+#enrichment regulons - degs
+res_gsea_degs<-fread("outputs/11-regulons_enrichment_genescore/res_gsea_regulons_degs.csv")
+res_gsea_degs[padj<0.05] #46
+res_gsea_degs[padj<0.05&NES<0] #16
+#     pathway         pval         padj   log2err         ES       NES size
+#  1:  ARID5A 2.166824e-06 1.430104e-05 0.6272567 -0.6541719 -2.434705   24
+#  2:   BRCA1 3.564308e-05 1.857192e-04 0.5573322 -0.4309827 -2.055753   64
+#  3:    CTCF 1.426337e-03 4.381913e-03 0.4550599 -0.6347891 -1.961397   13
+#  4:    E2F1 4.465968e-07 3.158078e-06 0.6749629 -0.3520359 -2.007411  182
+#  5:    EGR1 3.416092e-07 2.601486e-06 0.6749629 -0.6717122 -2.517119   26
+#  6:     FOS 1.789072e-09 2.530259e-08 0.7881868 -0.4216395 -2.342546  140
+#  7:    FOSB 9.421371e-11 1.865431e-09 0.8390889 -0.6252559 -2.798122   50
+#  8:     JUN 2.120224e-14 1.049511e-12 0.9759947 -0.5340468 -2.866158  115
+#  9:    JUNB 5.370605e-06 3.127587e-05 0.6105269 -0.3345703 -1.887180  164
+# 10:   KLF10 6.433794e-09 5.307880e-08 0.7614608 -0.4772567 -2.413191   89
+# 11:    KLF2 3.298653e-11 8.164167e-10 0.8513391 -0.5040806 -2.602989   98
+# 12:    KLF4 3.695465e-09 3.658511e-08 0.7749390 -0.6298719 -2.707370   42
+# 13:    KLF6 5.285320e-03 1.341658e-02 0.4070179 -0.3702973 -1.644896   48
+# 14:   NFKB2 2.918157e-03 8.024931e-03 0.4317077 -0.2818358 -1.564189  138
+# 15:    RELB 3.386403e-03 8.822472e-03 0.4317077 -0.3801516 -1.688670   48
+# 16:    YBX1 8.743607e-04 3.091490e-03 0.4772708 -0.3553222 -1.764431   79
+
+res_gsea_degs[padj<0.05&NES>0] #30
+
+fwrite(res_gsea_degs[padj<0.05],fp(out,"res_gsea_regulons_degs_padj0.05.csv"))
+
+#merge res_gsea_degs, res_gsea_gs
+res_gsea_gs<-fread("outputs/11-regulons_enrichment_genescore/res_gsea_genescore_regulons_hiconf.csv.gz",
+                   select = c(1:3,6,9),
+                     col.names = c("regulon","pval.gs","padj.gs","NES.gs","size.regulon"))
+res_gsea_degs<-fread("outputs/11-regulons_enrichment_genescore/res_gsea_regulons_degs.csv",
+                     select = c(1:3,6,9),
+                     col.names = c("regulon","pval.degs","padj.degs","NES.degs","size.regulon"))
+
+res_merge<-merge(res_gsea_gs,res_gsea_degs,all.x=T)
+
+
+
+gs_enrich_regulons<-res_merge[padj.gs<0.01&NES.gs>1.6]$regulon #33
+
+res_mergef<-res_merge[regulon%in%gs_enrich_regulons]
+
+regulons_ord<-res_mergef[order(NES.degs)]$regulon
+ggplot(res_mergef)+geom_point(aes(x=regulon,y=-log10(padj.degs),col=NES.degs,size=size.regulon))+
+  geom_hline(yintercept = 2)+
+  scale_x_discrete(limits=regulons_ord)+theme_minimal()+
+  theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5))+scale_color_gradient2(,low = "darkblue",high ='darkred' )
+ggsave(fp(out,"5B-dotplot_gsea_regulons_genescore_padj0.01_NES1.6_degs_merged.pdf"))
+
+#figure 6 : Pseudotime ####
+source("scripts/utils/new_utils.R")
+library(Seurat)
+out<-fp(out0,"figure6")
+dir.create(out)
+#6A : Pseudotime 
+
+cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps_filtered.rds")
+pseudo_mtd<-fread("outputs/12A-Pseudotime_integrated/metadata_pseudotime_ComputRoot.csv")
+cbps<-AddMetaData(cbps,
+                  metadata = data.frame(pseudo_mtd[,.(bc,pseudotime)],row.names = "bc"),
+                  col.name = "pseudotime")
+
+Idents(cbps)<-"lineage_hmap"
+FeaturePlot(cbps,"pseudotime",label=T,reduction = "ref.umap",cols = c("aquamarine1","darkorange2"))
+ggsave(fp(out,"umap_pseudotime.pdf"))
 
 mtd<-data.table(cbps@meta.data,keep.rownames = "bc")
+mtd$lineage_hmap<-factor(mtd$lineage,levels = c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid"))
 
-mtd[,n.sample:=.N,"sample_hto"]
-mtd[,pct.lin:=.N/n.sample,c("sample_hto","lineage_int")]
-mtsl<-unique(mtd[lineage_int%in%c("LT-HSC","HSC","MPP","Erythro-Mas","Myeloid","Lymphoid")],by=c("sample_hto","lineage_int"))
-mtsl$lineage_int<-factor(mtsl$lineage_int,levels = c("LT-HSC","HSC","MPP","Erythro-Mas","Myeloid","Lymphoid"))
-ggplot(mtsl[lineage_int%in%c("LT-HSC","HSC","MPP","Erythro-Mas","Myeloid","Lymphoid")])+geom_boxplot(aes(x=hto,y=pct.lin,fill=group))+
-  facet_wrap("lineage_int",scales = "free_y")
+ggplot(mtd[differentiated==F])+geom_boxplot(aes(y=pseudotime,x=lineage_hmap),alpha=0.7)+theme_minimal()
+ggsave(fp(out,"boxplot_pseudotime_by_lineage.pdf"))
 
-ggsave("outputs/figures_epi_response/figure4/4A-boxplot_cell_pop_diff_by_group_hto.pdf")
+mtd[,diff.lvl:=sapply(lineage_hmap,function(x)ifelse(x%in%c("LT-HSC",'HSC'),1,
+                                                   ifelse(x%in%c("MPP/LMPP"),2,
+                                                                 ifelse(x%in%c("Erythro-Mas","Lymphoid","Myeloid"),3,4))))]
+
+#cor
+summary(lm(pseudotime~diff.lvl,data=mtd))
+
+# Call:
+# lm(formula = pseudotime ~ diff.lvl, data = mtd)
+# 
+# Residuals:
+#      Min       1Q   Median       3Q      Max 
+# -18.8288  -2.4575  -0.1985   2.0387  21.2881 
+# 
+# Coefficients:
+#             Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)  2.29665    0.05950    38.6   <2e-16 ***
+# diff.lvl     5.67543    0.02862   198.3   <2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 4.193 on 45598 degrees of freedom
+#   (2397 observations deleted due to missingness)
+# Multiple R-squared:  0.463,	Adjusted R-squared:  0.463 
+# F-statistic: 3.932e+04 on 1 and 45598 DF,  p-value: < 2.2e-16
+
+#6B Pseudotime alteration
+
+#distribution 
+mtdf<-mtd[!sample%in%c("ctrlM530","ctrlF523")]
+ggplot(mtdf)+geom_boxplot(aes(x=pseudotime,y=group,fill=group),alpha=0.7)+facet_wrap('hto',nrow = 2)+theme_minimal()
+
+wilcox.test(mtdf[group=="ctrl"&hto==T]$pseudotime,mtdf[group=="lga"&hto==T]$pseudotime) #pvalue < 2.2e-16
+
+wilcox.test(mtdf[group=="ctrl"&hto==F]$pseudotime,mtdf[group=="lga"&hto==F]$pseudotime) #pvalue < 2.2e-16
+
+ggsave(fp(out,"boxplot_pseudotime_by_group_hto.pdf"))
 
 
-mtsl[,pvalue:=wilcox.test(pct.lin[group=="lga"],pct.lin[group=="ctrl"])$p.value,by=.(hto,lineage_int)]
-unique(mtsl[,.(lineage_int,hto,pvalue)])
+#percentage of cells below each pseudotime
 
-#     lineage_int   hto    pvalue
-#  1: Erythro-Mas FALSE 0.3659674
-#  2:         MPP FALSE 0.4452214
-#  3:         HSC FALSE 0.8356643
-#  4:     Myeloid FALSE 1.0000000
-#  5:    Lymphoid FALSE 0.9452214
-#  6:      LT-HSC FALSE 0.8762626
-#  7:         MPP  TRUE 0.1418581
-#  8:         HSC  TRUE 0.4135864
-#  9: Erythro-Mas  TRUE 0.3449883
-# 10:    Lymphoid  TRUE 0.4908425
-# 11:     Myeloid  TRUE 0.7545788
-# 12:      LT-HSC  TRUE 0.5727606
+mtd
+n_bins<-30
+pseudotime_thr<-1:n_bins*(max(mtdf$pseudotime,na.rm = T)/n_bins)
+pseudo_bins<-data.table(bin=0:(n_bins-1),
+                        pseudotime_thr=pseudotime_thr)
+mtdf[,bin:=sum(pseudotime>=pseudotime_thr),by="bc"]
+summary(mtdf$bin)
 
-table(unique(mtsl,by="sample_hto")$group_hto)
+pseudo_bins_mtd<-merge(pseudo_bins,mtdf)
+
+pseudo_bins_mtd[,n.cells:=.N,by="sample_hto"]
+pseudo_bins_mtd[,n.cells.bin:=.N,by=.(sample_hto,bin)]
+pseudo_bins_<-unique(pseudo_bins_mtd,by=c("sample_hto","bin"))
+pseudo_bins_[,n.cells.below.thr:=NA]
+pseudo_bins_[,n.cells.below.thr:=as.numeric(n.cells.below.thr)]
+
+for(binn in 0:n_bins){
+  pseudo_bins_[bin<=binn,n.cells.below.thr:=ifelse(is.na(n.cells.below.thr),sum(n.cells.bin),n.cells.below.thr),by="sample_hto"]
+
+  }
+
+pseudo_bins_[,pct.cells.below.thr:=n.cells.below.thr/n.cells]
+ggplot(pseudo_bins_,aes(x=factor(bin),y=pct.cells.below.thr,fill=group))+
+  geom_boxplot()+
+facet_wrap("hto")
+ggsave(fp(out,"boxplot_cumulated_pseudotime_by_group.pdf"))
+
+ggplot(pseudo_bins_[hto==T],aes(x=factor(bin),y=pct.cells.below.thr,fill=group))+
+  geom_boxplot()+
+facet_wrap("hto")
+
+plot(density(na.omit(mtd$pseudotime)))
 
 
-#4B : Pseudotime####
+#test counts par pseudotime influencé par group:hto ?
+glm.bins<-stats::glm(n.cells.bin~n.cells+pseudotime_thr*group*hto+batch,family=poisson(),data = pseudo_bins_)
+summary(glm.bins)
 
-#4supp : velocity
+# Call:
+# stats::glm(formula = n.cells.bin ~ n.cells + pseudotime_thr * 
+#     group * hto + batch, family = poisson(), data = pseudo_bins_)
+# 
+# Deviance Residuals: 
+#      Min        1Q    Median        3Q       Max  
+# -19.0806   -5.8031   -0.6116    3.5736   22.0908  
+# 
+# Coefficients: (1 not defined because of singularities)
+#                                   Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)                      1.743e+00  8.509e-02  20.480  < 2e-16 ***
+# n.cells                          5.848e-04  1.315e-05  44.468  < 2e-16 ***
+# pseudotime_thr                  -3.750e-03  9.145e-04  -4.101 4.12e-05 ***
+# grouplga                         2.534e-02  2.621e-02   0.967    0.334    
+# htoTRUE                          1.282e+00  8.635e-02  14.842  < 2e-16 ***
+# batchcbp0_lga                    1.375e+00  6.412e-02  21.445  < 2e-16 ***
+# batchcbp2                        1.627e-01  2.682e-02   6.068 1.29e-09 ***
+# batchcbp4                       -6.519e-03  2.744e-02  -0.238    0.812    
+# batchcbp6a                       1.330e+00  5.935e-02  22.408  < 2e-16 ***
+# batchcbp6b                       1.413e+00  7.076e-02  19.975  < 2e-16 ***
+# batchcbp6c                       1.475e+00  6.540e-02  22.562  < 2e-16 ***
+# batchcbp7a                       1.399e+00  6.287e-02  22.253  < 2e-16 ***
+# batchcbp7b                       1.276e+00  5.611e-02  22.743  < 2e-16 ***
+# batchcbp7c                       1.405e+00  5.504e-02  25.526  < 2e-16 ***
+# batchcbp8                               NA         NA      NA       NA    
+# pseudotime_thr:grouplga         -1.091e-02  1.332e-03  -8.187 2.67e-16 ***
+# pseudotime_thr:htoTRUE          -1.280e-02  2.150e-03  -5.953 2.63e-09 ***
+# grouplga:htoTRUE                -2.021e-01  4.510e-02  -4.482 7.38e-06 ***
+# pseudotime_thr:grouplga:htoTRUE  3.034e-02  2.799e-03  10.841  < 2e-16 ***
+
+
+#=>  counts par pseudotime est influencé par group_hto.
+
+#test counts par pseudotime influencé par group in stimulated cond ?
+glm.bins_hto<-stats::glm(n.cells.bin~n.cells+pseudotime_thr*group+batch,family=poisson(),data = pseudo_bins_[hto==T])
+summary(glm.bins_hto)
+
+# Call:
+# stats::glm(formula = n.cells.bin ~ n.cells + pseudotime_thr * 
+#     group + batch, family = poisson(), data = pseudo_bins_[hto == 
+#     T])
+# 
+# Deviance Residuals: 
+#      Min        1Q    Median        3Q       Max  
+# -12.8282   -4.4758   -0.5995    2.1113   14.6747  
+# 
+# Coefficients:
+#                           Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)              2.9826825  0.0402223  74.155  < 2e-16 ***
+# n.cells                  0.0007477  0.0000200  37.377  < 2e-16 ***
+# pseudotime_thr          -0.0167324  0.0019449  -8.603  < 2e-16 ***
+# grouplga                -0.2820240  0.0406433  -6.939 3.95e-12 ***
+# batchcbp4               -0.0278552  0.0287041  -0.970    0.332    
+# batchcbp8               -0.0393944  0.0292333  -1.348    0.178    
+# pseudotime_thr:grouplga  0.0191529  0.0024593   7.788 6.82e-15 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# (Dispersion parameter for poisson family taken to be 1)
+# 
+#     Null deviance: 10728  on 317  degrees of freedom
+# Residual deviance:  7650  on 311  degrees of freedom
+# AIC: 9177.9
+# 
+# Number of Fisher Scoring iterations: 5
+
+#=>  counts par pseudotime est influencé par group .
+
+
+#calc AUC by samples [TO UPDATE WITH COMPLETE DATA]
+library(zoo)
+
+x <- 1:10
+y <- 3*x+25
+id <- order(x)
+
+AUC <- sum(diff(x[id])*rollmean(y[id],2))
+
+#for 1
+x <- pseudo_bins_[sample_hto=="ctrlF547FALSE"]$pseudotime_thr
+y <- pseudo_bins_[sample_hto=="ctrlF547FALSE"]$pct.cells.below.thr
+id <- order(x)
+
+AUC <- sum(diff(x[id])*rollmean(y[id],2))
+
+#for all
+#need first calculate pct.cumul for each pseudotime [TO DO]
+df<-data.table(pseudotime=pseudotime_thr)
+pseudo_bins_[,AUC:=sum(diff(pseudotime_thr[order(pseudotime_thr)])*rollmean(pct.cells.below.thr[order(pseudotime_thr)],2)),by="sample_hto"]
+
+pseudo_bins_s<-unique(pseudo_bins_,by="sample_hto")
+ggplot(pseudo_bins_s)+geom_boxplot(aes(x=group,y=AUC,fill=sex))+facet_wrap("hto")
+
+
+pseudo_bins_s[,AUC.mean:=mean(AUC),by="group_hto"]
+pseudo_bins_s[,AUC.sem:= sd(AUC)/sqrt(.N),by="group_hto"]
+
+
+ggplot(unique(pseudo_bins_s,by="group_hto"))+geom_col(aes(x=group,y=AUC.mean))+facet_wrap("hto")
+
+plot(density(pseudo_bins_s$AUC))
+pseudo_bins_s[AUC<=max(boxplot.stats(pseudo_bins_s$AUC)$out)]
+t.test(pseudo_bins_s[group=='lga'&hto==T]$AUC,pseudo_bins_s[group=='ctrl'&hto==T]$AUC) #not sig
 
 
 
-#SEXUAL DIMORPHISM
-#figure 5 
-#5A : volcano
-#5B : DEGs expression
-#5C : alteration ++ regulons in LGA F
+#visuellement le pique de l'influence semble être à bin = 7 wich corresponf to HSC cells
+
+#so, is there less cells with pseudotim <7 in stimulated LGA compared to stimulated control ?
+
+glm.bins_7<-stats::glm(n.cells.below.thr~n.cells+group+batch,family=poisson(),data = pseudo_bins_[hto==T&bin==7])
+summary(glm.bins_7)
+# Call:
+# stats::glm(formula = n.cells.below.thr ~ n.cells + group + batch, 
+#     family = poisson(), data = pseudo_bins_[hto == T & bin == 
+#         7])
+# 
+# Deviance Residuals: 
+#    Min      1Q  Median      3Q     Max  
+# -9.700  -4.184  -0.584   3.858   9.342  
+# 
+# Coefficients:
+#               Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)  4.591e+00  7.603e-02  60.384  < 2e-16 ***
+# n.cells      5.995e-04  5.147e-05  11.646  < 2e-16 ***
+# grouplga    -5.096e-01  5.567e-02  -9.155  < 2e-16 ***
+# batchcbp4    1.698e-01  6.526e-02   2.602  0.00927 ** 
+# batchcbp8    3.564e-01  6.674e-02   5.340  9.3e-08 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# (Dispersion parameter for poisson family taken to be 1)
+# 
+#     Null deviance: 540.77  on 11  degrees of freedom
+# Residual deviance: 362.26  on  7  degrees of freedom
+# AIC: 453.61
+# 
+# Number of Fisher Scoring iterations: 5
+
+#[End UPDATE]
+#[to UPDATE] :
+sapply(unique(pseudo_bins_$bin), function(b){
+  tryCatch(
+    expr = {
+  glm.bins_<-stats::glm(n.cells.below.thr~n.cells+group+batch,family=poisson(),data = pseudo_bins_[hto==T&bin==b])
+  res_glm.bins_<-summary(glm.bins_)
+  res_glm.bins_$coefficients["grouplga",c("Estimate","Pr(>|z|)")]
+  },
+  error=function(c)NA
+  
+  )
+  }
+  ) #all signif but bin 5 a le plus gros coef
+
+#wilcoxon test stat : 
+wilcox.test(pseudo_bins_[hto==T&bin==6&group=="lga"]$pct.cells.below.thr,
+            pseudo_bins_[hto==T&bin==6&group=="ctrl"]$pct.cells.below.thr)
+
+
+#with lines :
+pseudo_bins_[,med.pct.cells:=median(pct.cells.below.thr),by=c("bin","group_hto")]
+pseudo_bins_[,mad.pct.cells:=mad(pct.cells.below.thr),by=c("bin","group_hto")]
+
+summary(pseudo_bins_$pct.cells.below.thr)
+
+pseudo_bins_g<-unique(pseudo_bins_,by=c("group_hto","bin"))
+ggplot(pseudo_bins_g,aes(x=pseudotime_thr,y=med.pct.cells,ymin=-mad.pct.cells, ymax=+mad.pct.cells,fill=group,linetype=group))+
+  geom_line()+
+  geom_ribbon(alpha=0.5)+
+facet_wrap("hto")
+
+
+
+#figure 7 :  ####
+source("scripts/utils/new_utils.R")
+out<-fp(out0,"figure7")
+dir.create(out)
+
+#7A : lineage bias
+mtd<-data.table(cbps@meta.data,keep.rownames = "bc")
+mtd$lineage_hmap<-factor(mtd$lineage_hmap,
+                         levels = c("LT-HSC",
+                                    "HSC",
+                                    "MPP/LMPP",
+                                    "Lymphoid",
+                                    "B cell",
+                                    "T cell",
+                                    "Erythro-Mas",
+                                    "Mk/Er",
+                                    "Myeloid",
+                                    "DC"))
+#rm outlyers
+ggplot(mtd)+geom_bar(aes(x=sample,fill=lineage_hmap),position ="fill" )+
+  facet_wrap("hto",scales = "free")+
+  theme(axis.text.x = element_text(angle = 90,hjust = 1))
+#rm 530 and 523 because outlyers in lineage distribution 
+mtdf<-mtd[!sample_hto%in%c("ctrlM530TRUE","ctrlF523TRUE")]
+
+#at group level
+ggplot(mtdf[hto==T])+geom_bar(aes(x=group,fill=lineage_hmap),position ="fill" )
+ggsave(fp(out,"7a-lineage_distrib_by_group.pdf"))
+chisq.test(table(mtdf[hto==T]$lineage_hmap,mtdf[hto==T]$group)) 
+# Pearson's Chi-squared test
+# 
+# data:  table(mtdf[hto == T]$lineage_hmap, mtdf[hto == T]$group)
+# X-squared = 429.88, df = 9, p-value < 2.2e-16
+
+#at sample lvl
+mtdf[,n.cells:=.N,"sample_hto"]
+mtdf[,n.cells.lin:=.N,c("sample_hto","lineage_hmap")]
+mtdf[,pct.lin:=.N/n.cells,c("sample_hto","lineage_hmap")]
+unique(mtdf[,.(sample_hto,lineage_hmap,pct.lin)])
+fwrite(mtdf,fp(out,"metadata_with_pct_lin.csv"))
+mtsl<-unique(mtdf[lineage_hmap%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")],by=c("sample_hto","lineage_hmap"))
+mtsl$lineage_hmap<-factor(mtsl$lineage_hmap,levels = c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid"))
+
+ggplot(mtsl)+geom_boxplot(aes(x=hto,y=pct.lin,fill=group) )+facet_wrap("lineage_hmap",scales="free")
+ggsave(fp(out,"7a-boxplot_lineage_proport_in_samples_by_group.pdf"))
+
+
+mtsl[,pval:=wilcox.test(pct.lin[group=="lga"],pct.lin[group=="ctrl"])$p.value,by=c("hto","lineage_hmap")]
+
+mthl<-unique(mtsl[!sample_hto%in%c("ctrlM530TRUE","ctrlF523TRUE"),.(hto,lineage_hmap,pval)])
+mthl[,padj:=p.adjust(pval),by="hto"]
+mthl
+#      hto lineage_hmap       pval       padj
+#  1: FALSE     MPP/LMPP 0.83566434 1.00000000
+#  2: FALSE          HSC 0.53379953 1.00000000
+#  3: FALSE  Erythro-Mas 0.53379953 1.00000000
+#  4: FALSE      Myeloid 0.62820513 1.00000000
+#  5: FALSE     Lymphoid 0.83566434 1.00000000
+#  6: FALSE       LT-HSC 0.79220779 1.00000000
+#  7:  TRUE     MPP/LMPP 0.13203463 0.66017316
+#  8:  TRUE          HSC 0.01515152 0.09090909
+#  9:  TRUE  Erythro-Mas 1.00000000 1.00000000
+# 10:  TRUE     Lymphoid 0.69913420 1.00000000
+# 11:  TRUE      Myeloid 0.24025974 0.96103896
+# 12:  TRUE       LT-HSC 0.73015873 1.00000000
+
+
+
+#change of proportion HSC ?
+mts<-data.table(sample=unique(mtsl$sample_hto),
+                n.hscs=as.vector(table(mtd[lineage_hmap=="HSC"]$sample_hto)[unique(mtsl$sample_hto)]),
+                n.cells=as.vector(table(mtd$sample_hto)[unique(mtsl$sample_hto)]),
+                group=unique(mtsl,by="sample_hto")$group,
+                hto=unique(mtsl,by="sample_hto")$hto,
+                batch=unique(mtsl,by="sample_hto")$batch,
+                sex=unique(mtsl,by="sample_hto")$sex)
+
+glm.hsc<-stats::glm(n.hscs~n.cells+group+batch+sex,family=poisson(),data = mts[hto==T])
+
+summary(glm.hsc)
+# Call:
+# stats::glm(formula = n.hscs ~ n.cells + group + batch + sex, 
+#     family = poisson(), data = mts[hto == T])
+# 
+# Deviance Residuals: 
+#      Min        1Q    Median        3Q       Max  
+# -18.6887   -5.4115   -0.3179    3.2327   12.7806  
+# 
+# Coefficients:
+#               Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)  5.342e+00  5.345e-02  99.931  < 2e-16 ***
+# n.cells      5.150e-04  4.654e-05  11.067  < 2e-16 ***
+# grouplga    -1.528e-01  4.907e-02  -3.113  0.00185 ** 
+# batchcbp3   -1.593e+00  1.539e-01 -10.355  < 2e-16 ***
+# batchcbp4   -2.317e-02  5.005e-02  -0.463  0.64342    
+# batchcbp8   -2.957e-01  5.627e-02  -5.255 1.48e-07 ***
+# sexM        -1.114e-02  5.545e-02  -0.201  0.84072    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# (Dispersion parameter for poisson family taken to be 1)
+# 
+#     Null deviance: 1704.38  on 13  degrees of freedom
+# Residual deviance:  934.65  on  7  degrees of freedom
+# AIC: 1049.3
+# 
+# Number of Fisher Scoring iterations: 5
+
+
+
+#change of proportion MPP ?
+mts<-data.table(sample=unique(mtsl$sample_hto),
+                n.mpps=as.vector(table(mtd[lineage_hmap=="MPP/LMPP"]$sample_hto)[unique(mtsl$sample_hto)]),
+                n.cells=as.vector(table(mtd$sample_hto)[unique(mtsl$sample_hto)]),
+                group=unique(mtsl,by="sample_hto")$group,
+                hto=unique(mtsl,by="sample_hto")$hto,
+                batch=unique(mtsl,by="sample_hto")$batch,
+                sex=unique(mtsl,by="sample_hto")$sex)
+
+glm.mpp<-stats::glm(n.mpps~n.cells+group+batch+sex,family=poisson(),data = mts[hto==T])
+
+summary(glm.mpp)
+# Call:
+# stats::glm(formula = n.mpps ~ n.cells + group + batch + sex, 
+#     family = poisson(), data = mts[hto == T])
+# 
+# Deviance Residuals: 
+#     Min       1Q   Median       3Q      Max  
+# -9.3855  -1.0268   0.1843   2.0875   6.2796  
+# 
+# Coefficients:
+#               Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)  4.778e+00  5.011e-02  95.356  < 2e-16 ***
+# n.cells      1.410e-03  4.196e-05  33.609  < 2e-16 ***
+# grouplga    -4.083e-01  4.188e-02  -9.749  < 2e-16 ***
+# batchcbp3   -1.165e+00  1.501e-01  -7.766 8.13e-15 ***
+# batchcbp4    3.926e-01  4.649e-02   8.444  < 2e-16 ***
+# batchcbp8    8.612e-01  4.277e-02  20.137  < 2e-16 ***
+# sexM        -6.275e-01  5.099e-02 -12.305  < 2e-16 ***
+
+mts<-data.table(sample=unique(mtsl$sample_hto),
+                n.cells_lin=as.vector(table(mtd[lineage_hmap=="Lymphoid"]$sample_hto)[unique(mtsl$sample_hto)]),
+                n.cells=as.vector(table(mtd$sample_hto)[unique(mtsl$sample_hto)]),
+                group=unique(mtsl,by="sample_hto")$group,
+                hto=unique(mtsl,by="sample_hto")$hto,
+                batch=unique(mtsl,by="sample_hto")$batch,
+                sex=unique(mtsl,by="sample_hto")$sex)
+
+glm.lin<-stats::glm(n.cells_lin~n.cells+group+batch+sex,family=poisson(),data = mts[hto==T])
+
+summary(glm.lin)
+# Call:
+# stats::glm(formula = n.cells_lin ~ n.cells + group + batch + 
+#     sex, family = poisson(), data = mts[hto == T])
+# 
+# Deviance Residuals: 
+#     Min       1Q   Median       3Q      Max  
+# -4.5792  -1.6967  -0.1383   0.3321   5.7411  
+# 
+# Coefficients:
+#               Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)  3.3013612  0.1229754  26.846  < 2e-16 ***
+# n.cells      0.0014065  0.0001519   9.261  < 2e-16 ***
+# grouplga    -0.6181826  0.1599613  -3.865 0.000111 ***
+# batchcbp3   -0.7466297  0.2649369  -2.818 0.004830 ** 
+# batchcbp4    0.0499724  0.1358303   0.368 0.712945    
+# batchcbp8   -0.9718284  0.1565491  -6.208 5.37e-10 ***
+# sexM        -0.5136635  0.1622625  -3.166 0.001547 ** 
+
+#change of cells proportions ?
+
+glm.lin_hto<-stats::glm(n.cells.lin~n.cells+lineage_hmap*group+batch+sex,family=poisson(),data = mtsl[hto==T])
+ summary(glm.lin_hto)
+
+# Call:
+# stats::glm(formula = n.cells.lin ~ n.cells + lineage_hmap * group + 
+#     batch + sex, family = poisson(), data = mtsl[hto == T])
+# 
+# Deviance Residuals: 
+#      Min        1Q    Median        3Q       Max  
+# -25.1204   -2.6923   -0.5314    1.3302   15.3360  
+# 
+# Coefficients:
+#                                    Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)                       1.621e-01  2.518e-01   0.644   0.5197    
+# n.cells                           1.090e-03  2.884e-05  37.781  < 2e-16 ***
+# lineage_hmapHSC                   4.739e+00  2.510e-01  18.881  < 2e-16 ***
+# lineage_hmapMPP/LMPP              4.968e+00  2.508e-01  19.811  < 2e-16 ***
+# lineage_hmapErythro-Mas           2.933e+00  2.558e-01  11.465  < 2e-16 ***
+# lineage_hmapMyeloid               2.242e+00  2.614e-01   8.577  < 2e-16 ***
+# lineage_hmapLymphoid              2.992e+00  2.555e-01  11.714  < 2e-16 ***
+# grouplga                          4.609e-03  3.293e-01   0.014   0.9888    
+# batchcbp3                        -8.902e-01  7.955e-02 -11.190  < 2e-16 ***
+# batchcbp4                         1.977e-01  3.086e-02   6.408 1.47e-10 ***
+# batchcbp8                         2.743e-01  3.090e-02   8.877  < 2e-16 ***
+# sexM                             -3.805e-01  3.439e-02 -11.062  < 2e-16 ***
+# lineage_hmapHSC:grouplga         -5.710e-01  3.302e-01  -1.730   0.0837 .  
+# lineage_hmapMPP/LMPP:grouplga    -2.014e-01  3.297e-01  -0.611   0.5412    
+# lineage_hmapErythro-Mas:grouplga -1.261e-01  3.361e-01  -0.375   0.7076    
+# lineage_hmapMyeloid:grouplga      1.136e-01  3.422e-01   0.332   0.7398    
+# lineage_hmapLymphoid:grouplga    -2.277e-01  3.360e-01  -0.678   0.4980    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# (Dispersion parameter for poisson family taken to be 1)
+# 
+#     Null deviance: 19907  on 80  degrees of freedom
+# Residual deviance:  2302  on 64  degrees of freedom
+# AIC: 2799
+# 
+# Number of Fisher Scoring iterations: 5
+ 
+ 
+glm.lin<-stats::glm(n.cells.lin~n.cells+lineage_hmap*group*hto+batch+sex,family=poisson(),data = mtsl)
+ summary(glm.lin)
+ 
+#  Call:
+# stats::glm(formula = n.cells.lin ~ n.cells + lineage_hmap * group * 
+#     hto + batch + sex, family = poisson(), data = mtsl)
+# 
+# Deviance Residuals: 
+#     Min       1Q   Median       3Q      Max  
+# -27.061   -4.371   -1.138    2.654   24.554  
+# 
+# Coefficients: (1 not defined because of singularities)
+#                                            Estimate Std. Error z value Pr(>|z|)    
+# (Intercept)                              -3.700e-01  1.270e-01  -2.913  0.00358 ** 
+# n.cells                                   6.254e-04  1.244e-05  50.256  < 2e-16 ***
+# lineage_hmapHSC                           3.415e+00  9.910e-02  34.456  < 2e-16 ***
+# lineage_hmapMPP/LMPP                      4.497e+00  9.811e-02  45.836  < 2e-16 ***
+# lineage_hmapErythro-Mas                   2.974e+00  9.993e-02  29.767  < 2e-16 ***
+# lineage_hmapMyeloid                       2.081e+00  1.032e-01  20.165  < 2e-16 ***
+# lineage_hmapLymphoid                      2.508e+00  1.013e-01  24.760  < 2e-16 ***
+# grouplga                                 -1.892e-01  1.444e-01  -1.310  0.19030    
+# htoTRUE                                   6.841e-01  2.789e-01   2.453  0.01416 *  
+# batchcbp0_lga                             1.631e+00  6.267e-02  26.031  < 2e-16 ***
+# batchcbp2                                 9.624e-02  2.356e-02   4.085 4.42e-05 ***
+# batchcbp3                                -9.467e-01  7.774e-02 -12.177  < 2e-16 ***
+# batchcbp4                                -2.852e-02  2.508e-02  -1.137  0.25546    
+# batchcbp6a                                1.440e+00  5.546e-02  25.967  < 2e-16 ***
+# batchcbp6b                                1.631e+00  7.010e-02  23.265  < 2e-16 ***
+# batchcbp6c                                1.621e+00  6.341e-02  25.556  < 2e-16 ***
+# batchcbp7a                                1.610e+00  6.154e-02  26.167  < 2e-16 ***
+# batchcbp7b                                1.474e+00  5.532e-02  26.640  < 2e-16 ***
+# batchcbp7c                                1.298e+00  5.379e-02  24.139  < 2e-16 ***
+# batchcbp8                                        NA         NA      NA       NA    
+# sexM                                      7.526e-02  1.217e-02   6.182 6.32e-10 ***
+# lineage_hmapHSC:grouplga                  2.482e-01  1.455e-01   1.706  0.08806 .  
+# lineage_hmapMPP/LMPP:grouplga            -3.574e-02  1.444e-01  -0.248  0.80449    
+# lineage_hmapErythro-Mas:grouplga         -3.076e-01  1.475e-01  -2.085  0.03706 *  
+# lineage_hmapMyeloid:grouplga             -5.657e-02  1.518e-01  -0.373  0.70932    
+# lineage_hmapLymphoid:grouplga            -4.499e-01  1.503e-01  -2.993  0.00276 ** 
+# lineage_hmapHSC:htoTRUE                   1.320e+00  2.698e-01   4.893 9.92e-07 ***
+# lineage_hmapMPP/LMPP:htoTRUE              4.674e-01  2.693e-01   1.736  0.08259 .  
+# lineage_hmapErythro-Mas:htoTRUE          -4.524e-02  2.746e-01  -0.165  0.86915    
+# lineage_hmapMyeloid:htoTRUE               1.581e-01  2.811e-01   0.562  0.57378    
+# lineage_hmapLymphoid:htoTRUE              4.811e-01  2.748e-01   1.751  0.08000 .  
+# grouplga:htoTRUE                          5.211e-01  3.589e-01   1.452  0.14645    
+# lineage_hmapHSC:grouplga:htoTRUE         -7.784e-01  3.608e-01  -2.157  0.03097 *  
+# lineage_hmapMPP/LMPP:grouplga:htoTRUE    -1.248e-01  3.599e-01  -0.347  0.72868    
+# lineage_hmapErythro-Mas:grouplga:htoTRUE  2.224e-01  3.671e-01   0.606  0.54461    
+# lineage_hmapMyeloid:grouplga:htoTRUE      2.110e-01  3.743e-01   0.564  0.57284    
+# lineage_hmapLymphoid:grouplga:htoTRUE     2.631e-01  3.681e-01   0.715  0.47477    
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# (Dispersion parameter for poisson family taken to be 1)
+# 
+#     Null deviance: 80741.9  on 156  degrees of freedom
+# Residual deviance:  8662.3  on 121  degrees of freedom
+# AIC: 9724.1
+# 
+# Number of Fisher Scoring iterations: 5
+
+#7B : CFU bias
+
+#7C : colony expansion alteration
+
+
+#table
+#number of cells/ech
+
+# genescore, gene
+
+#stimulation signature, pval, FC
+
+#DEGs LGA HSC activ
+
+
+
 
 

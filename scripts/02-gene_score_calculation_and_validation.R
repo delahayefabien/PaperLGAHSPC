@@ -166,7 +166,6 @@ ggplot(resg)+
 summary(lm(gene_score_add~n.cpg.gene+n.cpg.sig.gene+pval+meth.change+chromatin_feature+ensembl_reg_score+in_eQTR+abs(tss_dist),data = resg)) #best gene_score_add than gene_score
 
 
-
 # 2)valid expression change prediction
 meth_scores<-melt(resg[,.SD,.SDcols=c("gene",meth_metrics)],id.vars = "gene",variable.name = "meth_metric",value.name = "score")
 meth_scores[score==Inf,score:=NA]

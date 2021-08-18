@@ -30,9 +30,7 @@ regulons_list<-readRDS("../singlecell/outputs/05-SCENIC/cbps0-8_clean/regulons_l
 #with AUCell
 cells_rankings <- AUCell_buildRankings(as.matrix(cbps@assays$RNA@counts),nCores = 20)
 
-cells_AUC <- AUCell_calcAUC(regulons_list, cells_rankings, aucMaxRank=nrow(cells_rankings)*0.05,
-                            mctype="doMC"
-                            nCores = 20,)
+cells_AUC <- AUCell_calcAUC(regulons_list, cells_rankings, aucMaxRank=nrow(cells_rankings)*0.05)
 auc_mat<-getAUC(cells_AUC)
 cbps@assays[["TF_AUC"]] <- CreateAssayObject(auc_mat)
 DefaultAssay(cbps)<-"TF_AUC"

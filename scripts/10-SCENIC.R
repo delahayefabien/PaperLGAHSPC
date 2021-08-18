@@ -13,12 +13,12 @@ dir.create(out)
 
 
 #add integrated and SCENIC assa cbps_map_on_hmap
-cbps_scenic<-readRDS(fp(out,"cbps_with_regulons_activity.rds"))
+cbps<-readRDS(fp(out,"cbps_with_regulons_activity.rds"))
 VlnPlot(cbps_scenic, c("STAT3","GATA1","SPI1"),group.by="lineage",pt.size = 0) 
 
-#valid clustering with scenic
 DefaultAssay(cbps)<-"TF_AUC"
 
+#valid clustering with scenic
 #cluster with tf mat [to update]
 cbps<-FindVariableFeatures(cbps)
 cbps<-ScaleData(cbps)
@@ -54,58 +54,29 @@ for(hto_ in c(TRUE,FALSE)){
   for(lin in levels(cbps)){
   print(lin)
   
-  tf_diff<-data.table(FindMarkers(cbps,assay="SCENIC",logfc.threshold=0,
+  tf_diff<-data.table(FindMarkers(cbps,assay="TF_AUC",logfc.threshold=0,
                                   subset.ident = lin,group.by = "group_hto",
                        ident.1 = paste0("lga",hto_),ident.2 = paste0("ctrl",hto_)),keep.rownames = "regulon")
   i<-i+1
   
   tf_diff[,lineage:=lin]
+  tf_diff[,hto:=hto_]
+
   if(i==1){
     tf_diff_merge<-copy(tf_diff)
   }else{
-    tf_diff_merge<-rbind(tf_diff_merge,tf_diff)
+    tf_diff_merge<-rbind(tf_diff_merge,tf_diff,fill=T)
     }
   
 
   
   }
-    tf_diff_merge[,hto:=hto_]
 }
 
 
 fwrite(tf_diff_merge,fp(out,"regulon_activity_lga_vs_ctrl_HTO_by_lineage.csv.gz"),sep=";")
 
-#ctrl lga basal
-i<-0
-for(lin in levels(cbps)){
-  print(lin)
-  
-  tf_diff<-data.table(FindMarkers(cbps,assay="SCENIC",logfc.threshold=0,
-                                  subset.ident = lin,group.by = "group_hto",
-                       ident.1 = "lgaFALSE",ident.2 = "ctrlFALSE"),keep.rownames = "regulon")
-  i<-i+1
-  
-  tf_diff[,lineage:=lin]
-  if(i==1){
-    tf_diff_merge<-tf_diff
-  }else{
-    tf_diff_merge<-rbind(tf_diff_merge,tf_diff)
-    }
-  
-  
-}
-
-fwrite(tf_diff_merge,fp(out,"regulon_activity_lga_vs_ctrl_BASAL_by_lineage.csv.gz"),sep=";")
-
-
-tf_diff<-Reduce(rbind,list(fread(fp(out,"regulon_activity_lga_vs_ctrl_by_cell_type.csv.gz"),sep=";")[,compa:="lga_vs_ctrl"],
-                           fread(fp(out,"regulon_activity_lga_vs_ctrl_HTO_by_cell_type.csv.gz"),sep=";")[,compa:="lga_vs_ctrl_hto"],
-                           fread(fp(out,"regulon_activity_lga_vs_ctrl_BASAL_by_cell_type.csv.gz"),sep=";")[,compa:="lga_vs_ctrl_basal"]))
-
-
-tf_diff[p_val_adj<0.001&lineage=="HSC"&compa=="lga_vs_ctrl_hto"&abs(avg_log2FC)>0.05]
-
-cbps<-readRDS("../singlecell/outputs/cbps0_8.rds") #to modif
+#compare auc by group [to update]
 auc_score<-merge(data.table(cbps@meta.data[,colnames(cbps@meta.data)!="bc"],keep.rownames = 'bc'),melt.data.table(data.table(as.matrix(cbps@assays$SCENIC@counts),keep.rownames = "regulon"),variable.name ="bc" ,value.name ="score" ))
 auc_score[,score_scaled:=scale(score),by=.(regulon)]
 auc_score[,avg_score:=mean(score_scaled),by=.(regulon,group,hto,lineage_hmap)]

@@ -6,7 +6,7 @@ sample_name<-"cbps0-8_clean"
 out<-"outputs/10A-classical_integr/"
 dir.create(out)
 
-cbps_list<-SplitObject(readRDS("outputs/06-integr_singlecell_cbps/cbps_filtered.rds"),split.by = "orig.ident")
+cbps_list<-SplitObject(readRDS("outputs/06-integr_singlecell_cbps/cbps.rds"),split.by = "orig.ident")
 
 cbps_list<-lapply(cbps_list, SCTransform,vars.to.regress=c("percent.mt","CC.Difference"),
                   return.only.var.genes=F,
@@ -36,5 +36,6 @@ DimPlot(cbps,group.by = "lineage_hmap",reduction = "integrated.umap",label=T)
 DimPlot(cbps,group.by = "cell_type_hmap",reduction = "integrated.umap",label=T)
 
 saveRDS(cbps,fp(out,paste0(sample_name,".rds")))
+
 
 message("Success !")

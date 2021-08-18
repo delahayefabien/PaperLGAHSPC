@@ -106,16 +106,19 @@ table(mtd[,.(group,sex)])
 bool_vars<-c("latino","preterm","GDM","drugs","etoh", "smoking")
 categorical_vars<-c(bool_vars,"group","sex","group_sex","ethnicity","lab","batch","date","DNA.extraction","sequencing","year")
 
+mtd[,(categorical_vars):=lapply(.SD,as.factor),.SDcols=categorical_vars]
+
 lapply(mtd[,.SD,.SDcols=categorical_vars],function(x)sum(table(x)==1)) #exclude sequencing and date
 
 mtd<-mtd[,-c("sequencing","date","drugs")]
 library(ggrepel)
 meth_mat<-as.matrix(data.frame(methf,row.names = "cpg_id")[,mtd$sample])
 pca<-prcomp(t(meth_mat))
+saveRDS(pca,"outputs/01-lga_vs_ctrl_limma_DMCs_analysis/pca_lgactrl.rds")
+
 pc_mtd<-merge(mtd,data.table(pca$x,keep.rownames = "sample"))
 
 fwrite(pc_mtd,"datasets/cd34/metadata_pcs_cl_190421.csv",sep=";")
-pc_mtd<-fread("datasets/cd34/metadata_pcs_cl_190421.csv",sep=";")
 
 ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC2,col=group))
 ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC2,col=ponderal_index))
@@ -136,13 +139,15 @@ ggplot(pc_mtd)+geom_point(aes(x=PC1,y=PC2,col=library_complexity))
 
 
 pc_mtd[is.na(ponderal_index)]
-pval_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:30,res = "pval",seuilP = 0.1) #batch, seq depth,group_complexity,group , ethnicity
+pval_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:10,res = "pval",seuilP = 1) #batch, seq depth,group_complexity,group , ethnicity
+fwrite(data.table(pval_mat,keep.rownames = "covar"),fp(out,"pval_correl_covar_pcs.csv"),sep=";")
 
-r2_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:30,res = "r2",seuilP = 0.1) #batch, seq depth,group_complexity,group , ethnicity
+
+r2_mat<-CorrelCovarPCs(pca =pca ,mtd,rngPCs =1:10,res = "r2",seuilP = 1) #batch, seq depth,group_complexity,group , ethnicity
+fwrite(data.table(r2_mat,keep.rownames = "covar"),fp(out,"r2_correl_covar_pcs.csv"),sep=";")
 
 meth.influencing.vars<-rownames(pval_mat)[rowSums(pval_mat<0.01)>0]
 meth.influencing.vars<-c(meth.influencing.vars,"mat.age","latino","group")
-fwrite(data.table(pval_mat,keep.rownames = "covar"),fp(out,"res_correl_covar_pcs.csv"),sep=";")
 
 mtd2<-copy(mtd)
 mtd2[,library_complexity:=group_complexity_fac]

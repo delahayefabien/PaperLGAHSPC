@@ -772,6 +772,9 @@ cbps <- merge(cbps_list[[1]], cbps_list[2:length(cbps_list)],merge.dr = c("ref.p
 p<-DimPlot(cbps, reduction = "ref.umap", group.by =  "predicted.cell_type", label = TRUE, repel = TRUE, label.size = 3) + NoLegend()
 ggsave(fp(out,"predicted_cell_type.png"),plot=p)
 
+DimPlot(cbps, reduction = "ref.umap", group.by =  "predicted.lineage", label = TRUE, repel = TRUE, label.size = 3) + NoLegend()
+
+
 
 #add metadata
 
@@ -786,33 +789,10 @@ cbps[["sample_hto"]]<-paste0(cbps@meta.data$sample,cbps@meta.data$hto)
 cbps[["ambigous"]]<-cbps@meta.data$sample%in%c("iugrM558","lgaF559")
 
 cbps[["cell_type_hmap"]]<-cbps$predicted.cell_type
-cbps[["lineage_hmap"]]<-sapply(as.character(cbps@meta.data$cell_type_hmap), function(ct){
-  if(ct%in%c("HSC-1","HSC-2","HSC-3","HSC-4"))return("HSC")
-  else if(ct%in%c("MPP","MPP-Ery","LMPP"))return("MPP/LMPP")
-  else if(ct%in%c("EMP","EMP-cycle","ErP-cycle"))return("Erythro-Mas")
-  else if(ct%in%c("GMP","GMP-cycle"))return("Myeloid")
-  else if(ct%in%c("CLP","proB"))return("Lymphoid")
-  else return(ct)
-  
-})
+cbps[["lineage_hmap"]]<-cbps$predicted.lineage
 
 cbps$differentiated<-cbps$lineage_hmap%in%c("Mk/Er","18","DC","T cell","B cell")
 
-#check number of cells 
-#n of samples
-#all
-#non stim
-#stim
-
-#n of cells
-#all
-#non stim
-#stim
-
-#n of HSC 
-#all
-#non stim
-#stim
 
 #denovo umap
 cbps <- RunUMAP(cbps, reduction = 'ref.pca', dims = 1:30,reduction.name = "denovo.umap",n.components = 2)
@@ -826,8 +806,33 @@ cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps.rds")
 ####CHECK INTEGR OK####
 cbps_f<-subset(cbps,lineage_hmap!="18"&ambigous==F&group!="iugr")
 rm(cbps)
-cbps_f#44393 cells
-mtd<-data.table(cbps_f@meta.data,keep.rownames="bc")
+
+#check qu'on a bien tout
+
+#all
+cbps_f#47995 cells
+length(unique(cbps_f$sample_hto)) #27 samples_conditions
+length(unique(cbps_f$sample)) #23 samples
+
+#n samples by group
+mtd<-data.table(cbps_f@meta.data,keep.rownames = "bc")
+mts<-unique(mtd,by=c("sample_hto"))
+table(mts$hto,mts$group)
+  #       ctrl  lga
+  # FALSE    7   6
+  # TRUE     8   6
+
+#n of cells
+table(mtd$hto,mtd$group)
+  #       ctrl   lga
+  # FALSE 18520 16791
+  # TRUE   5823  6861
+
+#n of HSC 
+table(mtd[lineage_hmap=="HSC"]$hto,mtd[lineage_hmap=="HSC"]$group)
+  #      ctrl  lga
+  # FALSE 3485 4200
+  # TRUE  2093 1959
 
 #check subpop distr
 mtd$lineage_hmap<-factor(mtd$lineage_hmap,levels = c("LT-HSC","HSC","MPP/LMPP","Lymphoid","B cell","T cell","Erythro-Mas","Mk/Er","Myeloid","DC"))
@@ -857,5 +862,5 @@ saveRDS(cbps_f,fp(out,"cbps_filtered.rds"))
 
 #check good assignmenet
 
-VlnPlot(cbps_f,"predicted.cell_type.score",group.by = "predicted.cell_type")
-#OK
+VlnPlot(cbps_f,"predicted.lineage.score",group.by = "predicted.lineage",pt.size = 0)
+#attention a HSC2, 3 et 4, GMP cycle, et MPP Ery

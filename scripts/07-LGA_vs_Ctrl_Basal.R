@@ -48,6 +48,7 @@ mtd<-data.table(cbps_b@meta.data,keep.rownames="bc")
 mtd[,n.sample:=.N,by="sample_hto"]
 mtd[,pct.lin:=.N/n.sample,by=c("sample_hto","lineage_hmap")]
 
+fwrite(mtd,fp(out,"metadata_basal.csv"))
 ggplot(unique(mtd,by=c("sample","lineage_hmap")))+
   geom_boxplot(aes(x=lineage_hmap,y=pct.lin,fill=group))
 ggsave("outputs/figures_epi_response/figure2/2supp-distribution_lineage_control_lga_basal.pdf")
@@ -90,26 +91,8 @@ res_lin<-Reduce(rbind,lapply(levels(cbps_b),function(lin){
 
 fwrite(res_lin,fp(out,"res_pseudobulkDESeq2_by_lineage.csv.gz"),sep=";")
 
-#volcano by lin
-genes_of_interest<-c("SOCS3","HES1","JUN","FOS","JUNB","ZFP36","EGR1",
-                      "DUSP2","DUSP1","FOSB","SOCS1","KLF2","KLF4",
-                       "PLK2","PLK3","ID1","MYC","","ID2","IDS","RGCC")
-
-ggplot(res_lin[lineage%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")],aes(x=log2FoldChange,y=-log10(padj),col=padj<0.11&abs(log2FoldChange)>0.6))+
-  geom_point()+ 
-  geom_label_repel(aes(label = ifelse(padj<0.1&
-                                        abs(log2FoldChange)>0.6,gene,"")),
-                   max.overlaps = 5000,
-                   box.padding   = 0.35,
-                   point.padding = 0.5,
-                   segment.color = 'grey50')+
-  facet_wrap("lineage")+
-  scale_color_manual(values = c("grey","red")) +
-  theme_minimal() +
-  theme(legend.position = "bottom")
-ggsave("outputs/figures_epi_response/figure2/2supp-pseudo_bulk_deseq2_by_lineage_lga_vs_ctrl_basal.pdf")
 
 #sc 
-#run 07A
+#run 07A #[to redo]
 
 

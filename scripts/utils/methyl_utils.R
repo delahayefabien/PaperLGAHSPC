@@ -986,8 +986,7 @@ getGenesKEGGPathw<-function(pathID){
   library(KEGGREST)
   g<-keggGet(pathID)[[1]]$GENE
   g<-g[1:length(g)%%2==0]
-  return(as.vector(sapply(g,function(x)strsplit(x,";")[[1]][1])))
-}
+  return(as.vector(sapply(g,function(x)strsplit(x,";")[[1]][1])))}
 
 
 ul<-function(x)as.vector(unique(unlist(x)))
