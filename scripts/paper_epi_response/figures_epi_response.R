@@ -1,9 +1,8 @@
 
 source("scripts/utils/new_utils.R")
 out0<-"outputs/figures_epi_response"
-
-
-
+#
+null<-0
 #figure 1 : Epigenetic Memory ####
 out<-fp(out0,"figure1")
 dir.create(out,recursive = T)
@@ -78,9 +77,9 @@ res_mod_dt<-data.table(covariate=rownames(res_mod$coefficient),pval=res_mod$coef
 ggplot(res_mod_dt[covariate!='(Intercept)'])+geom_col(aes(x=covariate,y=-log10(pval)))+scale_y_log10()
 ggsave(fp(out,"suppfig1-covariates_influence_on_genescore.pdf"))
 
-
+resg<-unique(res_anno[order(gene,pval)],by="gene")
 resg[,mlog10pval:=-log10(pval)]
-meth_scores<-melt(resg[,.SD,.SDcols=c("gene","gene_score_add","mlog10pval","meth.change")],id.vars = "gene",variable.name = "meth_metric",value.name = "score")
+meth_scores<-melt(resg[,.SD,.SDcols=c("gene","gene_score_add","min.pval","avg.pval","mlog10pval","meth.change","avg.mlog10.pval","avg.meth.change","max.dmc_score", "avg.dmc_score")],id.vars = "gene",variable.name = "meth_metric",value.name = "score")
 meth_scores[score==Inf,score:=NA]
 meth_scores[score==-Inf,score:=NA]
 meth_scores<-meth_scores[!is.na(score)]
@@ -90,14 +89,25 @@ res_de_cl<-res_de_cl[!is.na(padj)]
 meth_scores_de<-merge(meth_scores,res_de_cl,by=c("gene"))
 unique(meth_scores_de[padj<0.05]$gene)#362 DEGS
 
+#        meth_metric         pval
+# 1:  gene_score_add 0.0006818586
+# 2:        min.pval 0.0249488972
+# 3:        avg.pval 0.7968159120
+# 4:      mlog10pval 0.0757731002
+# 5:     meth.change 0.0180098893
+# 6: avg.mlog10.pval 0.3534897816
+# 7: avg.meth.change 0.0368265523
+# 8:   max.dmc_score 0.0192803029
+# 9:   avg.dmc_score 0.4128018069
+
 meth_scores_de[,score_scaled:=scale(score),by="meth_metric"]
-meth_scores_de$meth_metric<-factor(meth_scores_de$meth_metric,levels = c("mlog10pval","meth.change","gene_score_add"))
+meth_scores_de$meth_metric<-factor(meth_scores_de$meth_metric,levels = c("min.pval","mlog10pval","meth.change","avg.pval","avg.mlog10.pval","avg.meth.change","max.dmc_score", "avg.dmc_score","gene_score_add"))
 ggplot(meth_scores_de)+
   geom_boxplot(aes(fill=padj<0.05,y=score_scaled,x=meth_metric),outlier.shape = NA)+
   coord_cartesian(ylim = c(-3,3))+
   theme_classic()+
   scale_fill_manual(values = c("white","grey"))
-ggsave(fp(out,"suppfig1-gene_score_pred_expression_change_compared_classical_metric.pdf"))
+ggsave(fp(out,"suppfig1-gene_score_pred_expression_change_compared_9classical_metrics.pdf"))
 
 meth_scores_de[,pval:=wilcox.test(score[padj<0.05],score[padj>=0.05])$p.value,by="meth_metric"]
 unique(meth_scores_de[,.(meth_metric,pval)],by="meth_metric")
@@ -425,17 +435,21 @@ library(clusterProfiler)
 library(org.Hs.eg.db)
 library(enrichplot)
 
-res_gsea_sig<-readRDS("outputs/08-HTO_signature/res_hto_signature_gsea_kegg.rds")
+res_sig_up<-readRDS("outputs/08-HTO_signature/res_hto_signature_kegg_up.rds")
 
-res_gsea_sig_dt<-data.table(as.data.frame(res_gsea_sig))
-res_gsea_sig_dt[p.adjust<0.05]
+res_sig_up_dt<-data.table(as.data.frame(res_sig_up))
+res_sig_up_dt[p.adjust<0.05]
 
-pdf(fp(out,"supp-emapplot_pathways_activation_signature_kegg_gsea_padj0.05_070821.pdf"),width = 12)
-emapplot(pairwise_termsim(res_gsea_sig),showCategory = 65)
+pdf(fp(out,"supp4C-emapplot_pathways_activation_signature_up_padj0.05.pdf"),width = 12)
+emapplot(pairwise_termsim(res_sig_up),showCategory = 49)
 dev.off()
 
-pdf(fp(out,"supp-dotplot_pathways_activation_signature_kegg_gsea_top20_070821.pdf"),width = 12)
-dotplot(res_gsea_sig,showCategory = 20)
+pdf(fp(out,"supp4C-emapplot_pathways_activation_signature_up_padj0.05_top25.pdf"),width = 12)
+emapplot(pairwise_termsim(res_sig_up),showCategory = 25)
+dev.off()
+
+pdf(fp(out,"supp4C-dotplot_pathways_activation_signature_up_padj0.05.pdf"),width = 8,height =12 )
+dotplot(res_sig_up,showCategory = 39)
 dev.off()
 
 res_or_sig_up<-fread("outputs/08-HTO_signature/res_hto_signature_kegg_up.csv")
@@ -504,11 +518,21 @@ res_lin_all<-Reduce(rbind,list(fread("outputs/08-HTO_signature/pseudobulk_DESeq2
 res_lin_all<-res_lin_all[lineage%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")]
 
 res_lin_all$lineage<-factor(res_lin_all$lineage,levels = c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid"))
-res_lin_all[padj<0.05&abs(log2FoldChange)>0.5,deg_sig:="deg"]
+#barplot degs by compa
+ggplot(res_lin_all[padj<0.05&abs(log2FoldChange)>0.5])+geom_bar(aes(x=lineage,fill=lineage))+
+  facet_wrap("compa")+scale_x_discrete(guide = guide_axis(angle = 45))
 
+ggsave(fp(out,"suppFig5-barplot_ndegs_by_lineage_and_compa.pdf"))
+
+#barplot degs_sign by compa
+ggplot(res_lin_all[padj<0.05&abs(log2FoldChange)>0.5&gene %in% hto_signature])+geom_bar(aes(x=lineage,fill=lineage))+
+  facet_wrap("compa")+scale_x_discrete(guide = guide_axis(angle = 45))
+ggsave(fp(out,"suppFig5-barplot_ndegs_signature_by_lineage_and_compa.pdf"))
+
+#volcanoplot degs by compa
+res_lin_all[padj<0.05&abs(log2FoldChange)>0.5,deg_sig:="deg"]
 res_lin_all[padj<0.05&abs(log2FoldChange)>0.5&gene %in% hto_signature,deg_sig:="deg_hto"]
 res_lin_all[is.na(deg_sig),deg_sig:="other_gene"]
-
 #ctrl
 ggplot(res_lin_all[compa=="ctrl_hto"],aes(x=log2FoldChange,y=-log10(padj),col=deg_sig))+
   geom_point(size=0.6)+
@@ -713,23 +737,43 @@ out<-fp(out0,"figure4")
 dir.create(out)
 #4A : hypermethylation  HSC activated DEGs 
 hsc_act_res_pseudo<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_pseudobulkDESeq2_by_lineage.csv.gz")[lineage=="HSC"]
-meth_res<-fread("outputs/02-gene_score_calculation_and_validation/res_genes.csv.gz")
-res_int_pseudo<-merge(meth_res[,.(gene,gene_score_add,pval_gs)],hsc_act_res_pseudo)
+hsc_act_res_pseudo[padj<0.05&abs(log2FoldChange)>0.5,deg_sig:="deg"]
+hsc_act_res_pseudo[padj<0.05&abs(log2FoldChange)>0.5&gene %in% hto_signature,deg_sig:="deg_hto"]
+hsc_act_res_pseudo[is.na(deg_sig),deg_sig:="non_deg"]
+hsc_act_res_pseudo$deg_sig<-factor(hsc_act_res_pseudo$deg_sig,levels = c('non_deg',"deg","deg_hto"))
+
+meth_res<-fread("outputs/02-gene_score_calculation_and_validation/res_anno.csv.gz")
+
+meth_res[,n.dmc:=sum(pval<0.001&abs(meth.change)>25),by="gene"]
+meth_resg<-unique(meth_res[order(gene,pval)][,.(gene,gene_score_add,n.dmc)],by="gene")
+
+res_int_pseudo<-merge(meth_resg,hsc_act_res_pseudo)
 res_int_pseudo[padj<0.05&abs(log2FoldChange)>0.5] #293
 res_int_pseudo[is.na(padj),padj:=1]
+res_int_pseudo[gene=="ARID5A"]
 
-res_int_pseudo[padj<0.05&abs(log2FoldChange)>0.5,deg_sig:="deg"]
-res_int_pseudo[padj<0.05&abs(log2FoldChange)>0.5&gene %in% hto_signature,deg_sig:="deg_hto"]
-res_int_pseudo[is.na(deg_sig),deg_sig:="non_deg"]
 table(res_int_pseudo$deg_sig)
-   # deg deg_hto non_deg 
-   #  256     180    8780 
-res_int_pseudo$deg_sig<-factor(res_int_pseudo$deg_sig,levels = c('non_deg',"deg","deg_hto"))
+# non_deg     deg deg_hto 
+#    8923     146     147 
 
+#DMCs enrich in DEGs
+res_int_pseudo[,n.dmc.gene:=sum(n.dmc)/.N,by="deg_sig"]
+ggplot(unique(res_int_pseudo[,.(deg_sig,n.dmc.gene)]))+geom_col(aes(x=deg_sig,y=n.dmc.gene,fill=deg_sig))
+ggsave(fp(out,"4A-n.dmc_by_gene_barplot.pdf"))
+
+ggplot(res_int_pseudo)+geom_boxplot(aes(x=deg_sig,y=n.dmc,fill=deg_sig),outlier.shape = NA)+coord_cartesian(ylim = c(0,3))
+ggsave(fp(out,"4A-n.dmc_by_gene_boxplot.pdf"))
+
+wilcox.test(res_int_pseudo[deg_sig=="non_deg"]$n.dmc,res_int_pseudo[deg_sig=="deg"]$n.dmc)
+#^p=0.68
+wilcox.test(res_int_pseudo[deg_sig=="non_deg"]$n.dmc,res_int_pseudo[deg_sig=="deg_hto"]$n.dmc)
+#p-value = 0.0007632
+
+#genescore enriched in DEGs
 ggplot(res_int_pseudo,aes(x=deg_sig,y=gene_score_add))+
   geom_boxplot(aes(fill=deg_sig),size=0.5,alpha=0.6,outlier.shape = NA)+
   scale_fill_manual(values = c("grey","red","blue"))+
-  coord_cartesian(ylim = c(0,1700))+
+  coord_cartesian(ylim = c(0,2000))+
   theme_classic()
 ggsave(fp(out,"4A-gene_score_boxplot.pdf"))
 
@@ -737,10 +781,10 @@ wilcox.test(res_int_pseudo[deg_sig=="non_deg"]$gene_score_add,res_int_pseudo[deg
 #p-value = 0.02839
 
 wilcox.test(res_int_pseudo[deg_sig=="non_deg"]$gene_score_add,res_int_pseudo[deg_sig=="deg_hto"]$gene_score_add)
-#p-value = 1.766e-07
+#p-value = 7.494e-07
 
 wilcox.test(res_int_pseudo[deg_sig=="deg_hto"]$gene_score_add,res_int_pseudo[deg_sig=="deg"]$gene_score_add)
-#p-value = 0.0106
+#p-value = 0.004262
 
 
 #4B : volcano plot correl meth - gene expression
@@ -754,7 +798,7 @@ ggplot(res_int_pseudo,aes(x=log2FoldChange,y=gene_score_add,col=deg_sig))+
     geom_label_repel(aes(label=ifelse(padj<0.05&abs(log2FoldChange)>0.5&gene_score_add>200&gene%in%genes_of_interest,gene,"")),
                    max.overlaps = 3000)+
   scale_color_manual(values = c("grey","red","blue"))+
-  coord_cartesian(ylim = c(0,3500))+
+  coord_cartesian(ylim = c(0,3000))+
   theme_classic()
 
 ggsave(fp(out,"4B-plot_gene_score_degs_lga_hsc_activated.pdf"))
@@ -768,6 +812,34 @@ ggplot(res_int_pseudo,aes(x=log2FoldChange,y=log(gene_score_add),col=deg_sig))+
   theme_classic()
 
 ggsave(fp(out,"4B-plot_gene_score_degs_lga_hsc_activated_log.pdf"))
+
+ggplot(res_int_pseudo,aes(x=log2FoldChange,y=rank(gene_score_add),col=deg_sig))+
+  geom_point(aes(alpha=deg_sig))+
+    geom_label_repel(aes(label=ifelse(padj<0.05&abs(log2FoldChange)>0.5&gene_score_add>200&gene%in%genes_of_interest,gene,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","red","blue"))+
+  theme_classic()
+
+
+quants<-quantile(res_int_pseudo$gene_score_add,1:100/100)
+res_int_pseudo[,gene_score_bin:=sum(gene_score_add>=quants),by="gene"]
+ggplot(res_int_pseudo,aes(x=log2FoldChange,y=gene_score_bin,col=deg_sig))+
+  geom_point()+
+    geom_label_repel(aes(label=ifelse(padj<0.05&abs(log2FoldChange)>0.5&gene_score_add>200&gene%in%genes_of_interest,gene,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","red","blue"))+
+  theme_classic()
+
+ggsave(fp(out,"4B-plot_gene_score_bins_degs_lga_hsc_activated260821.pdf"))
+
+ggplot(res_int_pseudo,aes(x=log2FoldChange,y=gene_score_bin,col=deg_sig))+
+  geom_point(aes(alpha=deg_sig))+
+    geom_label_repel(aes(label=ifelse(padj<0.05&abs(log2FoldChange)>0.5&gene_score_add>200&gene%in%genes_of_interest,gene,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","red","blue"))+
+  theme_classic()
+
+ggsave(fp(out,"4B-plot_gene_score_bins_degs_lga_hsc_activated260821.pdf"))
 
 
 #supp : sc HSC [to update]
@@ -834,6 +906,49 @@ regulons_list<-readRDS("../singlecell/outputs/05-SCENIC/cbps0-8_clean/regulons_l
 regulons_df<-Reduce(rbind,lapply(names(regulons_list), function(tf)data.table(term=tf,gene=regulons_list[[tf]])))
 fwrite(regulons_df,fp(out,"table-regulons_list.csv"))
 
+#supp : regulons activation after stimulation
+tf_diff_hto<-fread("outputs/10-SCENIC/regulon_activity_HTO_vs_not_by_lineage.csv.gz")
+
+mtd<-data.table(cbps@meta.data,keep.rownames = "cell")
+tfs_alt<-tf_diff_hto[p_val_adj<0.001&abs(avg_log2FC)>0.05&lineage=="HSC"&!str_detect(regulon,"e$")]$regulon
+tfs_alt20<-head(tfs_alt,20)
+tf_alt_act<-data.table(t(as.matrix(cbps@assays$TF_AUC@data[tfs_alt20,])),keep.rownames = "cell")
+tf_alt_act<-melt(tf_alt_act,id.vars = "cell",variable.name ="regulon",value.name = "activity" )
+tf_alt_act<-merge(tf_alt_act,mtd)
+
+ggplot(tf_alt_act[lineage_hmap=="HSC"])+
+  geom_boxplot(aes(x=regulon,y=activity,fill=hto))+theme_minimal()
+ggsave(fp(out,"supp-boxplot_tf_activity_change_padj0_log2FC0.05_hto_vs_not.pdf"))
+
+ggplot(tf_alt_act[lineage_hmap=="HSC"])+
+  geom_boxplot(aes(x=hto,y=activity,fill=hto))+facet_wrap("regulon",nrow = 2)
+  scale_fill_manual(values = c("white","brown1"))+theme_minimal()
+ggsave(fp(out,"supp-boxplot_tf_activity_change_padj0_top20_log2FC0.05_hto_vs_not.pdf"))
+
+tf_diff_hto[p_val_adj==0,p_val_adj:=10^-299]
+
+ggplot(tf_diff_hto[lineage=="HSC"&!str_detect(regulon,"e$")],aes(x=avg_log2FC,y=-log10(p_val_adj),col=p_val_adj<0.001&avg_log2FC>0.05))+
+  geom_point()+
+  geom_label_repel(aes(label=ifelse(p_val_adj<10^-250&avg_log2FC>0.05,regulon,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","red")) +
+  scale_y_continuous(limits = c(0,350))+
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+ggplot(tf_diff_hto[lineage=="HSC"&!str_detect(regulon,"e$")&p_val_adj<0.001&avg_log2FC>0.05],aes(x=regulon,y=avg_log2FC,fill=-log10(p_val_adj)))+
+  geom_col()+scale_x_discrete(limits=tf_diff_hto[lineage=="HSC"&!str_detect(regulon,"e$")&p_val_adj<0.001&avg_log2FC>0.05][order(-avg_log2FC)]$regulon)
+  theme_minimal() 
+
+avg_auc<-as.data.frame(AverageExpression(subset(cbps,lineage_hmap=="HSC"),assays = "TF_AUC",group.by = "hto")$TF_AUC)
+avg_auc<-avg_auc[!str_detect(rownames(avg_auc),"e$"),]
+avg_auc$steady_state<-avg_auc$`FALSE`
+avg_auc$stimulated<-avg_auc$`TRUE`
+
+ggplot(avg_auc)+
+  geom_point(aes(x=steady_state,y=stimulated,col=rownames(avg_auc)%in%tfs_alt))+
+  scale_color_manual(values = c("grey","red"))
+
 #5A : TF activity alteration
 
 res_tf_diff<-fread("outputs/10-SCENIC/regulon_activity_lga_vs_ctrl_HTO_by_lineage.csv.gz")
@@ -865,13 +980,14 @@ tfs_alt<-res_tf_diff[p_val_adj<0.001&lineage=="HSC"&abs(avg_log2FC)>0.05&hto==T]
 tf_alt_act<-data.table(t(as.matrix(cbps@assays$TF_AUC@data[tfs_alt,])),keep.rownames = "cell")
 tf_alt_act<-melt(tf_alt_act,id.vars = "cell",variable.name ="regulon",value.name = "activity" )
 tf_alt_act<-merge(tf_alt_act,mtd)
-ggplot(tf_alt_act[lineage_hmap=="HSC"&hto==T])+
+ggplot(tf_alt_act[lineage_hmap=="HSC"&hto==T&regulon!="KLF2e"])+
   geom_boxplot(aes(x=regulon,y=activity,fill=group))+theme_bw()
 ggsave(fp(out,"5a-boxplot_tf_activity_change_padj0.001_logFC0.05_lga_hsc_activated.pdf"))
 
 ggplot(tf_alt_act[lineage_hmap=="HSC"&regulon!="KLF2e"])+
-  geom_boxplot(aes(x=hto,y=activity,fill=group))+facet_wrap("regulon")+theme_bw()
+  geom_boxplot(aes(x=hto,y=activity,fill=group))+facet_wrap("regulon",nrow = 1)
 ggsave(fp(out,"5a-boxplot_tf_activity_change_padj0.001_logFC0.05_lga_hsc_activated_vs_not.pdf"))
+
 
 
 
@@ -937,8 +1053,8 @@ emapplot(pairwise_termsim(res_gsea_cl_sub,showCategory = 33),showCategory = 33)
 
 dev.off()
 #5D : Regulatory network Expression alteration
-
-res_gsea_cl_stem_net = res_gsea_cl_sub[res_gsea_cl_sub$ID%in%c("ATF3","FOS","JUNB","KLF2","FOSB","JUN","EGR1","JUND","KLF10","KLF4","ARID5A"), asis=T]
+stem_regulons<-c("ATF3","FOS","JUNB","KLF2","FOSB","JUN","EGR1","JUND","KLF10","KLF4","ARID5A")
+res_gsea_cl_stem_net = res_gsea_cl_sub[res_gsea_cl_sub$ID%in%stem_regulons, asis=T]
 class(res_gsea_cl_stem_net)
 
 res_degs<-fread("outputs/09-LGA_vs_Ctrl_Activated/res_pseudobulkDESeq2_by_lineage.csv.gz")[lineage=="HSC"]
@@ -973,6 +1089,18 @@ cnetplot(res_gsea_cl_stem_net,showCategory = 11,
          node_label = "category",
          )
 dev.off()
+
+#test enrichment of downregulated in this network
+regulons_list<-readRDS("../singlecell/outputs/05-SCENIC/cbps0-8_clean/regulons_list.rds")
+genes_stem_reg<-Reduce(union,regulons_list[stem_regulons])
+
+res_degs[gene%in%genes_stem_reg]#456
+res_degs[padj<0.05&log2FoldChange<0&gene%in%genes_stem_reg] #53
+53/456 #12%
+over_repr_test_simple(set1 = res_degs[padj<0.05&log2FoldChange<0]$gene,
+                      set2=genes_stem_reg,size_universe = nrow(res_degs))
+
+#p= 1.956816e-19
 
 fold_changes<-res_degs[padj<0.05&abs(log2FoldChange)>0.5]$log2FoldChange
 names(fold_changes)<-res_degs[padj<0.05&abs(log2FoldChange)>0.5]$gene
@@ -1026,6 +1154,7 @@ res_gsea_degs[padj<0.05&NES>0] #30
 fwrite(res_gsea_degs[padj<0.05],fp(out,"res_gsea_regulons_degs_padj0.05.csv"))
 
 #merge res_gsea_degs, res_gsea_gs
+
 res_gsea_gs<-fread("outputs/11-regulons_enrichment_genescore/res_gsea_genescore_regulons_hiconf.csv.gz",
                    select = c(1:3,6,9),
                      col.names = c("regulon","pval.gs","padj.gs","NES.gs","size.regulon"))
@@ -1035,9 +1164,52 @@ res_gsea_degs<-fread("outputs/11-regulons_enrichment_genescore/res_gsea_regulons
 
 res_merge<-merge(res_gsea_gs,res_gsea_degs,all.x=T)
 
-
+res_merge
+ggplot(res_merge,aes(x=-log10(padj.gs),y=-log10(padj.degs),col=padj.gs<0.01&padj.degs<0.01))+
+  geom_point(aes(size=size.regulon))+
+    geom_label_repel(aes(label=ifelse(padj.degs<0.01&padj.gs<0.01&regul,regulon,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","red"))+
+  theme_minimal()
 
 gs_enrich_regulons<-res_merge[padj.gs<0.01&NES.gs>1.6]$regulon #33
+
+ggplot(res_merge,aes(y=NES.gs,x=NES.degs,col=padj.gs<0.01&padj.degs<0.01))+
+  geom_point(aes(size=size.regulon))+
+    geom_label_repel(aes(label=ifelse(padj.gs<0.01&padj.degs<0.01,regulon,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","red"))+
+  theme_minimal()+theme(legend.position = "bottom")
+
+
+ggplot(res_merge,aes(y=NES.gs,x=NES.degs,col=padj.gs<0.01&NES.gs>1.6&padj.degs<0.01&abs(NES.degs)>1.6))+
+  geom_point(aes(size=size.regulon))+
+    geom_label_repel(aes(label=ifelse(padj.gs<0.01&NES.gs>1.6&padj.degs<0.01&abs(NES.degs)>1.6,regulon,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","red"))+
+  theme_minimal()+theme(legend.position = "bottom")
+
+ggsave(fp(out,"5B-dotplot_NES_gsea_regulons_genescore_degs.pdf"))
+
+
+
+ggplot(res_merge,aes(x=NES.gs,y=NES.degs,col=padj.gs<0.01&NES.gs>1.6&padj.degs<0.01&abs(NES.degs)>1.6))+
+  geom_point(aes(size=size.regulon))+
+    geom_label_repel(aes(label=ifelse(padj.gs<0.01&NES.gs>1.6&padj.degs<0.01&abs(NES.degs)>1.6,regulon,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","red"))+
+  theme_minimal()+theme(legend.position = "bottom")
+
+ggsave(fp(out,"5B-dotplot_NES_gsea_regulons_genescore_degs2.pdf"))
+
+ggplot(res_merge,aes(y=NES.gs,x=NES.degs,col=padj.gs<0.01&NES.gs>1.6&padj.degs<0.01&abs(NES.degs)>1.6))+
+  geom_point(aes(size=size.regulon))+
+    geom_label_repel(aes(label=ifelse(regulon%in% c("ARID5A",'EGR1','FOSB',"KLF4","KLF2","JUN"),regulon,"")),
+                   max.overlaps = 3000)+
+  scale_color_manual(values = c("grey","red"))+
+  theme_minimal()+theme(legend.position = "bottom")
+
+
 
 res_mergef<-res_merge[regulon%in%gs_enrich_regulons]
 
@@ -1048,285 +1220,14 @@ ggplot(res_mergef)+geom_point(aes(x=regulon,y=-log10(padj.degs),col=NES.degs,siz
   theme(axis.text.x = element_text(angle = 90,hjust = 1,vjust = 0.5))+scale_color_gradient2(,low = "darkblue",high ='darkred' )
 ggsave(fp(out,"5B-dotplot_gsea_regulons_genescore_padj0.01_NES1.6_degs_merged.pdf"))
 
-#figure 6 : Pseudotime ####
-source("scripts/utils/new_utils.R")
-library(Seurat)
-out<-fp(out0,"figure6")
-dir.create(out)
-#6A : Pseudotime 
-
-cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps_filtered.rds")
-pseudo_mtd<-fread("outputs/12A-Pseudotime_integrated/metadata_pseudotime_ComputRoot.csv")
-cbps<-AddMetaData(cbps,
-                  metadata = data.frame(pseudo_mtd[,.(bc,pseudotime)],row.names = "bc"),
-                  col.name = "pseudotime")
-
-Idents(cbps)<-"lineage_hmap"
-FeaturePlot(cbps,"pseudotime",label=T,reduction = "ref.umap",cols = c("aquamarine1","darkorange2"))
-ggsave(fp(out,"umap_pseudotime.pdf"))
-
-mtd<-data.table(cbps@meta.data,keep.rownames = "bc")
-mtd$lineage_hmap<-factor(mtd$lineage,levels = c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid"))
-
-ggplot(mtd[differentiated==F])+geom_boxplot(aes(y=pseudotime,x=lineage_hmap),alpha=0.7)+theme_minimal()
-ggsave(fp(out,"boxplot_pseudotime_by_lineage.pdf"))
-
-mtd[,diff.lvl:=sapply(lineage_hmap,function(x)ifelse(x%in%c("LT-HSC",'HSC'),1,
-                                                   ifelse(x%in%c("MPP/LMPP"),2,
-                                                                 ifelse(x%in%c("Erythro-Mas","Lymphoid","Myeloid"),3,4))))]
-
-#cor
-summary(lm(pseudotime~diff.lvl,data=mtd))
-
-# Call:
-# lm(formula = pseudotime ~ diff.lvl, data = mtd)
-# 
-# Residuals:
-#      Min       1Q   Median       3Q      Max 
-# -18.8288  -2.4575  -0.1985   2.0387  21.2881 
-# 
-# Coefficients:
-#             Estimate Std. Error t value Pr(>|t|)    
-# (Intercept)  2.29665    0.05950    38.6   <2e-16 ***
-# diff.lvl     5.67543    0.02862   198.3   <2e-16 ***
-# ---
-# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-# 
-# Residual standard error: 4.193 on 45598 degrees of freedom
-#   (2397 observations deleted due to missingness)
-# Multiple R-squared:  0.463,	Adjusted R-squared:  0.463 
-# F-statistic: 3.932e+04 on 1 and 45598 DF,  p-value: < 2.2e-16
-
-#6B Pseudotime alteration
-
-#distribution 
-mtdf<-mtd[!sample%in%c("ctrlM530","ctrlF523")]
-ggplot(mtdf)+geom_boxplot(aes(x=pseudotime,y=group,fill=group),alpha=0.7)+facet_wrap('hto',nrow = 2)+theme_minimal()
-
-wilcox.test(mtdf[group=="ctrl"&hto==T]$pseudotime,mtdf[group=="lga"&hto==T]$pseudotime) #pvalue < 2.2e-16
-
-wilcox.test(mtdf[group=="ctrl"&hto==F]$pseudotime,mtdf[group=="lga"&hto==F]$pseudotime) #pvalue < 2.2e-16
-
-ggsave(fp(out,"boxplot_pseudotime_by_group_hto.pdf"))
-
-
-#percentage of cells below each pseudotime
-
-mtd
-n_bins<-30
-pseudotime_thr<-1:n_bins*(max(mtdf$pseudotime,na.rm = T)/n_bins)
-pseudo_bins<-data.table(bin=0:(n_bins-1),
-                        pseudotime_thr=pseudotime_thr)
-mtdf[,bin:=sum(pseudotime>=pseudotime_thr),by="bc"]
-summary(mtdf$bin)
-
-pseudo_bins_mtd<-merge(pseudo_bins,mtdf)
-
-pseudo_bins_mtd[,n.cells:=.N,by="sample_hto"]
-pseudo_bins_mtd[,n.cells.bin:=.N,by=.(sample_hto,bin)]
-pseudo_bins_<-unique(pseudo_bins_mtd,by=c("sample_hto","bin"))
-pseudo_bins_[,n.cells.below.thr:=NA]
-pseudo_bins_[,n.cells.below.thr:=as.numeric(n.cells.below.thr)]
-
-for(binn in 0:n_bins){
-  pseudo_bins_[bin<=binn,n.cells.below.thr:=ifelse(is.na(n.cells.below.thr),sum(n.cells.bin),n.cells.below.thr),by="sample_hto"]
-
-  }
-
-pseudo_bins_[,pct.cells.below.thr:=n.cells.below.thr/n.cells]
-ggplot(pseudo_bins_,aes(x=factor(bin),y=pct.cells.below.thr,fill=group))+
-  geom_boxplot()+
-facet_wrap("hto")
-ggsave(fp(out,"boxplot_cumulated_pseudotime_by_group.pdf"))
-
-ggplot(pseudo_bins_[hto==T],aes(x=factor(bin),y=pct.cells.below.thr,fill=group))+
-  geom_boxplot()+
-facet_wrap("hto")
-
-plot(density(na.omit(mtd$pseudotime)))
-
-
-#test counts par pseudotime influencé par group:hto ?
-glm.bins<-stats::glm(n.cells.bin~n.cells+pseudotime_thr*group*hto+batch,family=poisson(),data = pseudo_bins_)
-summary(glm.bins)
-
-# Call:
-# stats::glm(formula = n.cells.bin ~ n.cells + pseudotime_thr * 
-#     group * hto + batch, family = poisson(), data = pseudo_bins_)
-# 
-# Deviance Residuals: 
-#      Min        1Q    Median        3Q       Max  
-# -19.0806   -5.8031   -0.6116    3.5736   22.0908  
-# 
-# Coefficients: (1 not defined because of singularities)
-#                                   Estimate Std. Error z value Pr(>|z|)    
-# (Intercept)                      1.743e+00  8.509e-02  20.480  < 2e-16 ***
-# n.cells                          5.848e-04  1.315e-05  44.468  < 2e-16 ***
-# pseudotime_thr                  -3.750e-03  9.145e-04  -4.101 4.12e-05 ***
-# grouplga                         2.534e-02  2.621e-02   0.967    0.334    
-# htoTRUE                          1.282e+00  8.635e-02  14.842  < 2e-16 ***
-# batchcbp0_lga                    1.375e+00  6.412e-02  21.445  < 2e-16 ***
-# batchcbp2                        1.627e-01  2.682e-02   6.068 1.29e-09 ***
-# batchcbp4                       -6.519e-03  2.744e-02  -0.238    0.812    
-# batchcbp6a                       1.330e+00  5.935e-02  22.408  < 2e-16 ***
-# batchcbp6b                       1.413e+00  7.076e-02  19.975  < 2e-16 ***
-# batchcbp6c                       1.475e+00  6.540e-02  22.562  < 2e-16 ***
-# batchcbp7a                       1.399e+00  6.287e-02  22.253  < 2e-16 ***
-# batchcbp7b                       1.276e+00  5.611e-02  22.743  < 2e-16 ***
-# batchcbp7c                       1.405e+00  5.504e-02  25.526  < 2e-16 ***
-# batchcbp8                               NA         NA      NA       NA    
-# pseudotime_thr:grouplga         -1.091e-02  1.332e-03  -8.187 2.67e-16 ***
-# pseudotime_thr:htoTRUE          -1.280e-02  2.150e-03  -5.953 2.63e-09 ***
-# grouplga:htoTRUE                -2.021e-01  4.510e-02  -4.482 7.38e-06 ***
-# pseudotime_thr:grouplga:htoTRUE  3.034e-02  2.799e-03  10.841  < 2e-16 ***
-
-
-#=>  counts par pseudotime est influencé par group_hto.
-
-#test counts par pseudotime influencé par group in stimulated cond ?
-glm.bins_hto<-stats::glm(n.cells.bin~n.cells+pseudotime_thr*group+batch,family=poisson(),data = pseudo_bins_[hto==T])
-summary(glm.bins_hto)
-
-# Call:
-# stats::glm(formula = n.cells.bin ~ n.cells + pseudotime_thr * 
-#     group + batch, family = poisson(), data = pseudo_bins_[hto == 
-#     T])
-# 
-# Deviance Residuals: 
-#      Min        1Q    Median        3Q       Max  
-# -12.8282   -4.4758   -0.5995    2.1113   14.6747  
-# 
-# Coefficients:
-#                           Estimate Std. Error z value Pr(>|z|)    
-# (Intercept)              2.9826825  0.0402223  74.155  < 2e-16 ***
-# n.cells                  0.0007477  0.0000200  37.377  < 2e-16 ***
-# pseudotime_thr          -0.0167324  0.0019449  -8.603  < 2e-16 ***
-# grouplga                -0.2820240  0.0406433  -6.939 3.95e-12 ***
-# batchcbp4               -0.0278552  0.0287041  -0.970    0.332    
-# batchcbp8               -0.0393944  0.0292333  -1.348    0.178    
-# pseudotime_thr:grouplga  0.0191529  0.0024593   7.788 6.82e-15 ***
-# ---
-# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-# 
-# (Dispersion parameter for poisson family taken to be 1)
-# 
-#     Null deviance: 10728  on 317  degrees of freedom
-# Residual deviance:  7650  on 311  degrees of freedom
-# AIC: 9177.9
-# 
-# Number of Fisher Scoring iterations: 5
-
-#=>  counts par pseudotime est influencé par group .
-
-
-#calc AUC by samples [TO UPDATE WITH COMPLETE DATA]
-library(zoo)
-
-x <- 1:10
-y <- 3*x+25
-id <- order(x)
-
-AUC <- sum(diff(x[id])*rollmean(y[id],2))
-
-#for 1
-x <- pseudo_bins_[sample_hto=="ctrlF547FALSE"]$pseudotime_thr
-y <- pseudo_bins_[sample_hto=="ctrlF547FALSE"]$pct.cells.below.thr
-id <- order(x)
-
-AUC <- sum(diff(x[id])*rollmean(y[id],2))
-
-#for all
-#need first calculate pct.cumul for each pseudotime [TO DO]
-df<-data.table(pseudotime=pseudotime_thr)
-pseudo_bins_[,AUC:=sum(diff(pseudotime_thr[order(pseudotime_thr)])*rollmean(pct.cells.below.thr[order(pseudotime_thr)],2)),by="sample_hto"]
-
-pseudo_bins_s<-unique(pseudo_bins_,by="sample_hto")
-ggplot(pseudo_bins_s)+geom_boxplot(aes(x=group,y=AUC,fill=sex))+facet_wrap("hto")
-
-
-pseudo_bins_s[,AUC.mean:=mean(AUC),by="group_hto"]
-pseudo_bins_s[,AUC.sem:= sd(AUC)/sqrt(.N),by="group_hto"]
-
-
-ggplot(unique(pseudo_bins_s,by="group_hto"))+geom_col(aes(x=group,y=AUC.mean))+facet_wrap("hto")
-
-plot(density(pseudo_bins_s$AUC))
-pseudo_bins_s[AUC<=max(boxplot.stats(pseudo_bins_s$AUC)$out)]
-t.test(pseudo_bins_s[group=='lga'&hto==T]$AUC,pseudo_bins_s[group=='ctrl'&hto==T]$AUC) #not sig
 
 
 
-#visuellement le pique de l'influence semble être à bin = 7 wich corresponf to HSC cells
-
-#so, is there less cells with pseudotim <7 in stimulated LGA compared to stimulated control ?
-
-glm.bins_7<-stats::glm(n.cells.below.thr~n.cells+group+batch,family=poisson(),data = pseudo_bins_[hto==T&bin==7])
-summary(glm.bins_7)
-# Call:
-# stats::glm(formula = n.cells.below.thr ~ n.cells + group + batch, 
-#     family = poisson(), data = pseudo_bins_[hto == T & bin == 
-#         7])
-# 
-# Deviance Residuals: 
-#    Min      1Q  Median      3Q     Max  
-# -9.700  -4.184  -0.584   3.858   9.342  
-# 
-# Coefficients:
-#               Estimate Std. Error z value Pr(>|z|)    
-# (Intercept)  4.591e+00  7.603e-02  60.384  < 2e-16 ***
-# n.cells      5.995e-04  5.147e-05  11.646  < 2e-16 ***
-# grouplga    -5.096e-01  5.567e-02  -9.155  < 2e-16 ***
-# batchcbp4    1.698e-01  6.526e-02   2.602  0.00927 ** 
-# batchcbp8    3.564e-01  6.674e-02   5.340  9.3e-08 ***
-# ---
-# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
-# 
-# (Dispersion parameter for poisson family taken to be 1)
-# 
-#     Null deviance: 540.77  on 11  degrees of freedom
-# Residual deviance: 362.26  on  7  degrees of freedom
-# AIC: 453.61
-# 
-# Number of Fisher Scoring iterations: 5
-
-#[End UPDATE]
-#[to UPDATE] :
-sapply(unique(pseudo_bins_$bin), function(b){
-  tryCatch(
-    expr = {
-  glm.bins_<-stats::glm(n.cells.below.thr~n.cells+group+batch,family=poisson(),data = pseudo_bins_[hto==T&bin==b])
-  res_glm.bins_<-summary(glm.bins_)
-  res_glm.bins_$coefficients["grouplga",c("Estimate","Pr(>|z|)")]
-  },
-  error=function(c)NA
-  
-  )
-  }
-  ) #all signif but bin 5 a le plus gros coef
-
-#wilcoxon test stat : 
-wilcox.test(pseudo_bins_[hto==T&bin==6&group=="lga"]$pct.cells.below.thr,
-            pseudo_bins_[hto==T&bin==6&group=="ctrl"]$pct.cells.below.thr)
-
-
-#with lines :
-pseudo_bins_[,med.pct.cells:=median(pct.cells.below.thr),by=c("bin","group_hto")]
-pseudo_bins_[,mad.pct.cells:=mad(pct.cells.below.thr),by=c("bin","group_hto")]
-
-summary(pseudo_bins_$pct.cells.below.thr)
-
-pseudo_bins_g<-unique(pseudo_bins_,by=c("group_hto","bin"))
-ggplot(pseudo_bins_g,aes(x=pseudotime_thr,y=med.pct.cells,ymin=-mad.pct.cells, ymax=+mad.pct.cells,fill=group,linetype=group))+
-  geom_line()+
-  geom_ribbon(alpha=0.5)+
-facet_wrap("hto")
-
-
-
-#figure 7 :  ####
+#figure 7 : lineage bias  ####
 source("scripts/utils/new_utils.R")
 out<-fp(out0,"figure7")
 dir.create(out)
+cbps<-readRDS("outputs/06-integr_singlecell_cbps/cbps_filtered.rds")
 
 #7A : lineage bias
 mtd<-data.table(cbps@meta.data,keep.rownames = "bc")
@@ -1341,15 +1242,8 @@ mtd$lineage_hmap<-factor(mtd$lineage_hmap,
                                     "Mk/Er",
                                     "Myeloid",
                                     "DC"))
-#rm outlyers
-ggplot(mtd)+geom_bar(aes(x=sample,fill=lineage_hmap),position ="fill" )+
-  facet_wrap("hto",scales = "free")+
-  theme(axis.text.x = element_text(angle = 90,hjust = 1))
-#rm 530 and 523 because outlyers in lineage distribution 
-mtdf<-mtd[!sample_hto%in%c("ctrlM530TRUE","ctrlF523TRUE")]
-
 #at group level
-ggplot(mtdf[hto==T])+geom_bar(aes(x=group,fill=lineage_hmap),position ="fill" )
+ggplot(mtd)+geom_bar(aes(x=group,fill=lineage_hmap),position ="fill" )+facet_wrap("hto")
 ggsave(fp(out,"7a-lineage_distrib_by_group.pdf"))
 chisq.test(table(mtdf[hto==T]$lineage_hmap,mtdf[hto==T]$group)) 
 # Pearson's Chi-squared test
@@ -1357,31 +1251,47 @@ chisq.test(table(mtdf[hto==T]$lineage_hmap,mtdf[hto==T]$group))
 # data:  table(mtdf[hto == T]$lineage_hmap, mtdf[hto == T]$group)
 # X-squared = 429.88, df = 9, p-value < 2.2e-16
 
+chisq.test(table(mtdf[hto==F]$lineage_hmap,mtdf[hto==F]$group)) 
+# 	Pearson's Chi-squared test
+# 
+# data:  table(mtd[hto == F]$group, mtd[hto == F]$lineage_hmap)
+# X-squared = 340.98, df = 9, p-value < 2.2e-16
+
 #at sample lvl
-mtdf[,n.cells:=.N,"sample_hto"]
-mtdf[,n.cells.lin:=.N,c("sample_hto","lineage_hmap")]
-mtdf[,pct.lin:=.N/n.cells,c("sample_hto","lineage_hmap")]
-unique(mtdf[,.(sample_hto,lineage_hmap,pct.lin)])
-fwrite(mtdf,fp(out,"metadata_with_pct_lin.csv"))
-mtsl<-unique(mtdf[lineage_hmap%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")],by=c("sample_hto","lineage_hmap"))
+mtd[,n.cells:=.N,"sample_hto"]
+mtd[,n.cells.lin:=.N,c("sample_hto","lineage_hmap")]
+mtd[,pct.lin:=.N/n.cells,c("sample_hto","lineage_hmap")]
+mtsl<-unique(mtd[lineage_hmap%in%c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid")],by=c("sample_hto","lineage_hmap"))
 mtsl$lineage_hmap<-factor(mtsl$lineage_hmap,levels = c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid"))
 
-ggplot(mtsl)+geom_boxplot(aes(x=hto,y=pct.lin,fill=group) )+facet_wrap("lineage_hmap",scales="free")
+#rm outlyers
+ggplot(mtsl)+geom_boxplot(aes(x=hto,y=pct.lin,fill=group))+facet_wrap("lineage_hmap")
+  # scale_x_discrete(guide = guide_axis(angle = 45))+
+  # scale_y_continuous(expand = c(0,0))
+
+mtsl[,is.outlier:=pct.lin%in%boxplot.stats(pct.lin)$out,by=.(group,hto,lineage_hmap)]
+mtsl[(is.outlier)]$sample_hto 
+mtsl[,is.outlier:=pct.lin%in%boxplot.stats(pct.lin)$out,by=.(group,hto,lineage_hmap)]
+mtsl[,outlier:=sample_hto%in%sample_hto[(is.outlier)]]
+unique(mtsl[(outlier)]$sample_hto) #"lgaF552FALSE"  "ctrlF523TRUE"  "ctrlM537FALSE" "ctrlM530TRUE"
+mtslf<-mtsl[(!outlier)]
+ggplot(mtslf)+
+  geom_boxplot(aes(x=lineage_hmap,y=pct.lin,fill=group))+facet_wrap("hto")
 ggsave(fp(out,"7a-boxplot_lineage_proport_in_samples_by_group.pdf"))
 
 
-mtsl[,pval:=wilcox.test(pct.lin[group=="lga"],pct.lin[group=="ctrl"])$p.value,by=c("hto","lineage_hmap")]
+mtslf[,pval:=wilcox.test(pct.lin[group=="lga"],pct.lin[group=="ctrl"])$p.value,by=c("hto","lineage_hmap")]
 
-mthl<-unique(mtsl[!sample_hto%in%c("ctrlM530TRUE","ctrlF523TRUE"),.(hto,lineage_hmap,pval)])
+mthl<-unique(mtslf[,.(hto,lineage_hmap,pval)])
 mthl[,padj:=p.adjust(pval),by="hto"]
 mthl
-#      hto lineage_hmap       pval       padj
-#  1: FALSE     MPP/LMPP 0.83566434 1.00000000
-#  2: FALSE          HSC 0.53379953 1.00000000
-#  3: FALSE  Erythro-Mas 0.53379953 1.00000000
-#  4: FALSE      Myeloid 0.62820513 1.00000000
-#  5: FALSE     Lymphoid 0.83566434 1.00000000
-#  6: FALSE       LT-HSC 0.79220779 1.00000000
+#       hto lineage_hmap       pval       padj
+#  1: FALSE     MPP/LMPP 0.66233766 1.00000000
+#  2: FALSE          HSC 1.00000000 1.00000000
+#  3: FALSE  Erythro-Mas 0.42857143 1.00000000
+#  4: FALSE      Myeloid 0.79220779 1.00000000
+#  5: FALSE     Lymphoid 0.79220779 1.00000000
+#  6: FALSE       LT-HSC 0.28571429 1.00000000
 #  7:  TRUE     MPP/LMPP 0.13203463 0.66017316
 #  8:  TRUE          HSC 0.01515152 0.09090909
 #  9:  TRUE  Erythro-Mas 1.00000000 1.00000000
@@ -1400,7 +1310,17 @@ mts<-data.table(sample=unique(mtsl$sample_hto),
                 batch=unique(mtsl,by="sample_hto")$batch,
                 sex=unique(mtsl,by="sample_hto")$sex)
 
-glm.hsc<-stats::glm(n.hscs~n.cells+group+batch+sex,family=poisson(),data = mts[hto==T])
+glm.hsc <- stats::glm(n.hscs~n.cells+group+batch+sex,family=poisson(),data = mts[(hto)])
+
+glm.hsc.null <- stats::glm(n.hscs~group, family="poisson", data = mts[(hto)])
+
+glm.hsc.nocell <- stats::glm(n.hscs~group+batch+sex, family="poisson", data = mts[(hto)])
+
+performance::compare_performance(glm.hsc.null, glm.hsc, glm.hsc.nocell)
+
+performance::check_model(glm.hsc)
+performance::check_model(stats::glm(n.hscs~n.cells+group+batch+sex,family=gaussian(),data = mts[(hto)]))
+anova(glm.hsc.null, glm.hsc)
 
 summary(glm.hsc)
 # Call:
@@ -1613,5 +1533,223 @@ glm.lin<-stats::glm(n.cells.lin~n.cells+lineage_hmap*group*hto+batch+sex,family=
 
 
 
+ 
+ #figure 6 : Pseudotime ####
+source("scripts/utils/new_utils.R")
+library(Seurat)
+out<-fp(out0,"figure6")
+dir.create(out)
+#6A : Pseudotime 
+pseudo_mtd<-fread("outputs/12A-Pseudotime_integrated/metadata_pseudotime_ComputRoot.csv")
+cbps<-AddMetaData(cbps,
+                  metadata = data.frame(pseudo_mtd[,.(bc,pseudotime)],row.names = "bc"),
+                  col.name = "pseudotime")
 
+Idents(cbps)<-"lineage_hmap"
+FeaturePlot(cbps,"pseudotime",label=T,reduction = "ref.umap",cols = c("aquamarine1","darkorange2"))
+ggsave(fp(out,"umap_pseudotime.pdf"))
+
+mtd<-data.table(cbps@meta.data,keep.rownames = "bc")
+mtd$lineage_hmap<-factor(mtd$lineage,levels = c("LT-HSC","HSC","MPP/LMPP","Erythro-Mas","Myeloid","Lymphoid"))
+
+ggplot(mtd)+geom_boxplot(aes(y=pseudotime,x=lineage_hmap),alpha=0.7)+theme_minimal()
+ggsave(fp(out,"boxplot_pseudotime_by_lineage.pdf"))
+
+#cor
+summary(lm(pseudotime~lineage_hmap,data=mtd))
+
+# Call:
+# lm(formula = pseudotime ~ lineage_hmap, data = mtd)
+# 
+# Residuals:
+#     Min      1Q  Median      3Q     Max 
+# -23.933  -2.542  -0.037   2.215  27.842 
+# 
+# Coefficients:
+#                         Estimate Std. Error t value Pr(>|t|)    
+# (Intercept)               1.4181     0.2576   5.505 3.71e-08 ***
+# lineage_hmapHSC           6.9209     0.2602  26.603  < 2e-16 ***
+# lineage_hmapMPP/LMPP     11.9950     0.2588  46.350  < 2e-16 ***
+# lineage_hmapErythro-Mas  15.1831     0.2640  57.520  < 2e-16 ***
+# lineage_hmapMyeloid      18.0431     0.2708  66.619  < 2e-16 ***
+# lineage_hmapLymphoid     23.0087     0.2671  86.154  < 2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+# 
+# Residual standard error: 3.856 on 45499 degrees of freedom
+#   (2492 observations deleted due to missingness)
+# Multiple R-squared:  0.5451,	Adjusted R-squared:  0.545 
+# F-statistic: 1.09e+04 on 5 and 45499 DF,  p-value: < 2.2e-16
+
+#6B Pseudotime alteration
+
+#distribution 
+#rm outliers
+mtdf<-mtd[sample_hto%in%unique(mtslf$sample_hto)]
+
+ggplot(mtdf)+geom_boxplot(aes(x=pseudotime,y=group,fill=group),alpha=0.7)+facet_wrap('hto',nrow = 2)+theme_minimal()
+
+wilcox.test(mtdf[group=="ctrl"&hto==T]$pseudotime,mtdf[group=="lga"&hto==T]$pseudotime) #pvalue < 2.2e-16
+
+wilcox.test(mtdf[group=="ctrl"&hto==F]$pseudotime,mtdf[group=="lga"&hto==F]$pseudotime) #pvalue < 2.2e-16
+
+ggsave(fp(out,"boxplot_pseudotime_by_group_hto.pdf"))
+
+# pseudotime influencé par group:hto ?
+ggplot(mtdf)+geom_density(aes(x=pseudotime,fill=group),alpha=0.5,alpha=0.7)+facet_wrap('hto')+theme_minimal()
+ggsave(fp(out,"density_pseudotime_by_group_hto.pdf"))
+
+#choose model ~ data
+#mtd
+ggplot(mtdf)+
+  geom_density(aes(x=pseudotime)) # binomial
+ggplot(mtdf[(hto)])+
+  geom_density(aes(x=pseudotime,col = group,group=sample)) #
+
+ggplot(mtd[(hto)])+
+  geom_density(aes(x=pseudotime,col = group))
+
+
+mtdf[,n_cells.sample:=.N,by="sample_hto"]
+mtdf[,n_cells.scaled:=scale(n_cells.sample)]
+library(lmerTest)
+
+lm_null<-lmer(formula = pseudotime~ 1 + group + (1|sample_hto), data = mtdf[!is.na(pseudotime)&(hto)])
+performance::check_model(lm_null)
+lm_lin<-lmer(formula = pseudotime ~ 1 +group+ group:lineage_hmap + (1|sample_hto), data = mtdf[!is.na(pseudotime)&(hto)])
+
+lm_ls<-lmer(formula = pseudotime ~ 1 +group+ group:lineage_hmap+n_cells.sample +lineage_hmap+ (1|sample_hto), data = mtdf[!is.na(pseudotime)&(hto)])
+
+lm_lsb<-lmer(formula = pseudotime ~ 1 +group+ group:lineage_hmap+n_cells.sample +batch+ (1|sample_hto), data = mtdf[!is.na(pseudotime)&(hto)])
+lm_lsbs<-lmer(formula = pseudotime ~ 1 +group+ group:lineage_hmap+lineage_hmap+n_cells.sample +batch+ sex+(1|sample_hto), data = mtdf[!is.na(pseudotime)&(hto)])
+
+performance::compare_performance(lm_null, lm_lin,lm_ls,lm_lsb,lm_lsbs) #lm_lin best
+
+summary(lm_lin)
+# Linear mixed model fit by REML. t-tests use Satterthwaite's method ['lmerModLmerTest']
+# Formula: pseudotime ~ 1 + group + group:lineage_hmap + (1 | sample_hto)
+#    Data: mtdf[!is.na(pseudotime) & (hto)]
+# 
+# REML criterion at convergence: 59915
+# 
+# Scaled residuals: 
+#     Min      1Q  Median      3Q     Max 
+# -5.1702 -0.6330 -0.0157  0.5318  6.1511 
+# 
+# Random effects:
+#  Groups     Name        Variance Std.Dev.
+#  sample_hto (Intercept)  0.4478  0.6692  
+#  Residual               14.3201  3.7842  
+# Number of obs: 10888, groups:  sample_hto, 12
+# 
+# Fixed effects:
+#                                     Estimate Std. Error         df t value Pr(>|t|)    
+# (Intercept)                           6.6663     1.1268  2212.3544   5.916 3.81e-09 ***
+# grouplga                             -5.5674     1.4248  1517.7642  -3.907 9.74e-05 ***
+# groupctrl:lineage_hmapHSC             2.0080     1.0971 10868.5204   1.830   0.0672 .  
+# grouplga:lineage_hmapHSC              8.0747     0.8325 10869.7961   9.700  < 2e-16 ***
+# groupctrl:lineage_hmapMPP/LMPP        6.5944     1.0971 10867.4584   6.011 1.91e-09 ***
+# grouplga:lineage_hmapMPP/LMPP        12.8196     0.8294 10868.4432  15.456  < 2e-16 ***
+# groupctrl:lineage_hmapErythro-Mas    10.1700     1.1176 10867.9724   9.100  < 2e-16 ***
+# grouplga:lineage_hmapErythro-Mas     15.1684     0.8444 10869.4526  17.963  < 2e-16 ***
+# groupctrl:lineage_hmapMyeloid        12.6886     1.1546 10866.9057  10.989  < 2e-16 ***
+# grouplga:lineage_hmapMyeloid         18.0219     0.8541 10868.3455  21.102  < 2e-16 ***
+# groupctrl:lineage_hmapLymphoid       17.4038     1.1150 10868.6054  15.609  < 2e-16 ***
+# grouplga:lineage_hmapLymphoid        24.0667     0.8452 10869.2256  28.474  < 2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+lm_b_lin<-lmer(formula = pseudotime ~ 1 +group+ group:lineage_hmap + (1|sample_hto), data = mtdf[!is.na(pseudotime)&!(hto)])
+summary(lm_b_lin)
+# Linear mixed model fit by REML. t-tests use Satterthwaite's method ['lmerModLmerTest']
+# Formula: pseudotime ~ 1 + group + group:lineage_hmap + (1 | sample_hto)
+#    Data: mtdf[!is.na(pseudotime) & !(hto)]
+# 
+# REML criterion at convergence: 154948.2
+# 
+# Scaled residuals: 
+#     Min      1Q  Median      3Q     Max 
+# -6.3029 -0.6327 -0.0141  0.5659  5.6513 
+# 
+# Random effects:
+#  Groups     Name        Variance Std.Dev.
+#  sample_hto (Intercept)  0.07964 0.2822  
+#  Residual               14.57641 3.8179  
+# Number of obs: 28077, groups:  sample_hto, 11
+# 
+# Fixed effects:
+#                                     Estimate Std. Error         df t value Pr(>|t|)    
+# (Intercept)                           1.0601     0.4000   992.0184   2.651  0.00816 ** 
+# grouplga                             -0.3533     0.7188  2061.0833  -0.492  0.62310    
+# groupctrl:lineage_hmapHSC             6.8697     0.3883 28062.1933  17.691  < 2e-16 ***
+# grouplga:lineage_hmapHSC              7.1566     0.5876 28063.4479  12.180  < 2e-16 ***
+# groupctrl:lineage_hmapMPP/LMPP       12.3462     0.3847 28064.8946  32.092  < 2e-16 ***
+# grouplga:lineage_hmapMPP/LMPP        12.5135     0.5852 28064.9969  21.385  < 2e-16 ***
+# groupctrl:lineage_hmapErythro-Mas    15.3401     0.3947 28064.2646  38.863  < 2e-16 ***
+# grouplga:lineage_hmapErythro-Mas     16.1351     0.5954 28064.9787  27.101  < 2e-16 ***
+# groupctrl:lineage_hmapMyeloid        18.6161     0.4068 28064.9726  45.765  < 2e-16 ***
+# grouplga:lineage_hmapMyeloid         18.4699     0.6033 28059.7529  30.615  < 2e-16 ***
+# groupctrl:lineage_hmapLymphoid       20.8289     0.4078 28064.4742  51.075  < 2e-16 ***
+# grouplga:lineage_hmapLymphoid        24.0670     0.6050 28064.6660  39.779  < 2e-16 ***
+# ---
+# Signif. codes:  0 ‘***’ 0.001 ‘**’ 0.01 ‘*’ 0.05 ‘.’ 0.1 ‘ ’ 1
+
+#figures : percentage of cells below each pseudotime
+mtdf
+n_bins<-30
+pseudotime_thr<-1:n_bins*(max(mtdf$pseudotime,na.rm = T)/n_bins)
+pseudo_bins<-data.table(bin=0:(n_bins-1),
+                        pseudotime_thr=pseudotime_thr)
+mtdf[,bin:=sum(pseudotime>=pseudotime_thr),by="bc"]
+summary(mtdf$bin)
+
+pseudo_bins_mtd<-merge(pseudo_bins,mtdf)
+
+pseudo_bins_mtd[,n.cells:=.N,by="sample_hto"]
+pseudo_bins_mtd[,n.cells.bin:=.N,by=.(sample_hto,bin)]
+pseudo_bins_<-unique(pseudo_bins_mtd,by=c("sample_hto","bin"))
+for(gr in c("ctrl","lga")){
+  for(h in c(FALSE,TRUE)){
+    samples<-unique(pseudo_bins_[group==gr&hto==h]$sample)
+    for(i in 1:max(pseudo_bins_$bin)){
+      for(s in setdiff(samples,pseudo_bins_[bin==i&group==gr&hto==h]$sample)){
+        pseudo_bins_<-rbind(pseudo_bins_,pseudo_bins_[bin==i-1&group==gr&hto==h&sample==s][,bin:=bin+1][,n.cells.bin:=0])
+        
+      }
+      
+    }
+    
+  }
+  
+}
+
+pseudo_bins_[,pct.cells.bin:=n.cells.bin/n.cells,by=.(sample_hto,bin)]
+
+pseudo_bins_[,n.cells.below.thr:=NA]
+pseudo_bins_[,n.cells.below.thr:=as.numeric(n.cells.below.thr)]
+
+for(binn in 0:n_bins){
+  pseudo_bins_[bin<=binn,n.cells.below.thr:=ifelse(is.na(n.cells.below.thr),sum(n.cells.bin),n.cells.below.thr),by="sample_hto"]
+
+  }
+
+pseudo_bins_[,pct.cells.below.thr:=n.cells.below.thr/n.cells]
+ggplot(pseudo_bins_,aes(x=factor(bin),y=pct.cells.below.thr,fill=group))+
+  geom_boxplot()+
+facet_wrap("hto")
+ggsave(fp(out,"boxplot_cumulated_pseudotime_by_group.pdf"))
+
+#visuellement le pique de l'influence semble être à bin = 7 wich corresponf to HSC cells
+#so, is there less cells with pseudotim <7 in stimulated LGA compared to stimulated control ?
+
+wilcox.test(pseudo_bins_[hto==T&bin==7&group=="lga"]$pct.cells.below.thr,pseudo_bins_[hto==T&bin==7&group=="ctrl"]$pct.cells.below.thr)
+#p-value = 0.04113
+
+wilcox.test(pseudo_bins_[hto==F&bin==7&group=="lga"]$pct.cells.below.thr,pseudo_bins_[hto==F&bin==7&group=="ctrl"]$pct.cells.below.thr)
+# p-value = 0.9307
+
+#for each pseudotime
+pseudo_bins_[,pval:=wilcox.test(pct.cells.below.thr[group=="lga"],pct.cells.below.thr[group=="ctrl"])$p.value,by=.(hto,bin)]
+
+unique(pseudo_bins_[,.(bin,hto,pval)])[order(hto,bin)]
 

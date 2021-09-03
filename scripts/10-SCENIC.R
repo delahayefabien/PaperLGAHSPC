@@ -1,6 +1,7 @@
 #scenic on cbps0-8 
 out<-"outputs/10-SCENIC"
 dir.create(out)
+library(Seurat)
 #need first batch correct the counts with seuratv3
 #run 10A-
 
@@ -45,7 +46,32 @@ saveRDS(cbps,"../singlecell/outputs/cbps0_8.rds")
 
 #[end to do update]
 
-#tf activity difference by lineage
+
+#tf activity stim vs not  by lineage
+Idents(cbps)<-"lineage_hmap"
+i<-0
+for(lin in levels(cbps)){
+print(lin)
+
+tf_diff<-data.table(FindMarkers(cbps,assay="TF_AUC",logfc.threshold=0,
+                                subset.ident = lin,group.by = "hto",
+                     ident.1 = TRUE,ident.2 = FALSE),keep.rownames = "regulon")
+i<-i+1
+
+tf_diff[,lineage:=lin]
+
+if(i==1){
+  tf_diff_merge<-copy(tf_diff)
+}else{
+  tf_diff_merge<-rbind(tf_diff_merge,tf_diff,fill=T)
+}
+}
+
+fwrite(tf_diff_merge,fp(out,"regulon_activity_HTO_vs_not_by_lineage.csv.gz"),sep=";")
+
+
+
+#tf activity LGA vs ctrl by lineage and hto
 Idents(cbps)<-"lineage_hmap"
 
 
