@@ -10,6 +10,22 @@ git config --global user.name "Alexandre Pelletier"
 ``` r
 renv::hydrate()
 renv::install(c("YuLab-SMU/clusterProfiler"))
+renv::install("missMDA")
+renv::snapshot() #git commit
+renv::install("bioc::batchelor")
+renv::install('cole-trapnell-lab/leidenbase')
+renv::install("cole-trapnell-lab/monocle3")
+renv::install("satijalab/seurat-wrappers")
+
+renv::install(c("bioc::scater",
+                "bioc::GENIE3",
+                "bioc::RcisTarget")) #for SCENIC
+                
+renv::install("doRNG") #for SCENIC
+renv::install("doMC") #for SCENIC
+renv::install("aertslab/SCENIC")
+
+
 renv::snapshot() #git commit
 ```
 
@@ -17,8 +33,8 @@ renv::snapshot() #git commit
 
 ``` bash
 cd 
-ln -s /disks/DATATMP/PhD_AlexandrePelletier/methyl/methyl/datasets datasets
-ln -s /disks/DATATMP/PhD_AlexandrePelletier/methyl/methyl/ref ref
+ln -s /disks/DATATMP/PhD_AlexandrePelletier/methyl/datasets datasets
+ln -s /disks/DATATMP/PhD_AlexandrePelletier/methyl/ref ref
 ln -s /disks/DATATMP/HSPC_EpiStress_AlexandrePelletier/methyl/ old 
 ```
 

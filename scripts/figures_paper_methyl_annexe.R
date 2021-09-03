@@ -4,7 +4,8 @@ library(limma)
 library(pheatmap)
 out<-"../methyl/outputs/figures_paper_meth"
 dir.create(out)
-#validation cohorts
+
+
 meth<-fread("../methyl/datasets/cd34/2020-05-25_methyl_data_before_limma.csv")
 mtd<-fread("../methyl/datasets/cd34/cleaned_batch_CD34_library_date_220620.csv")
 
@@ -17,8 +18,10 @@ cpgs_weight[,cpg_weight:=RegWeight+LinksWeight]
 meth_df<-merge(meth_df,cpgs_weight[,.(locisID,gene,cpg_weight)],by="locisID")
 meth_df[,gene_meth:=sum(methylation*cpg_weight)/sum(cpg_weight),by=c("sample","gene")]
 fwrite(meth_df,fp(out,"methylation_sum_by_gene_datatable.tsv.gz"),sep="\t")
-meth_genes<-unique(meth_df,by=c("sample","gene"))
+meth_df<-fread(fp(out,"methylation_sum_by_gene_datatable.tsv.gz"),sep="\t")
 
+meth_genes<-unique(meth_df,by=c("sample","gene"))
+plot(density(meth_genes$gene_meth))
 meth_genes[,gene_meth_scaled:=scale(gene_meth),by=c("sample")]
 
 meth_genes_mat<-dcast(meth_genes[,-c("locisID","hi.conf.genes","methylation","gene_meth")],sample~gene)

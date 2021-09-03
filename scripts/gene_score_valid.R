@@ -292,10 +292,7 @@ resp[adj.P.Val<0.1]
 library(data.table)
 library(stringr)
 #pour la norm
-# if (!requireNamespace("BiocManager", quietly = TRUE))
-#   install.packages("BiocManager")
-# 
-# BiocManager::install("ENmix")
+# renv::install("bioc::ENmix")
 #library(ENmix)
 
 library(limma)

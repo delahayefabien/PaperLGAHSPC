@@ -87,6 +87,7 @@ ggplot(res_gsea[!str_detect(regulon,'e$')][padj<=sort(padj)[15]])+
   geom_col(aes(x=regulon,y=-log10(padj),fill=NES))+
   scale_x_discrete(limits=regulons_ord)
 
+
 #=> TF epigen alteration by lineage
 res_gsea<-res_gsea_all[compa=="CF.LF"][,regulon:=pathway][,-"pathway"]
 

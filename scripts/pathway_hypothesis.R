@@ -730,10 +730,7 @@ custom_exampl<-read.gmt("ref/msigdb/c2.cp.kegg.v7.1.symbols.gmt")
 head(custom_exampl)
 custom_exampl[str_detect(custom_exampl$term,"LONGEVITY")] #no longevity in this db
 
-if (!requireNamespace("BiocManager", quietly = TRUE))
-  install.packages("BiocManager")
-
-BiocManager::install("KEGGREST")
+# renv::install("bioc::KEGGREST")
 getGenesKEGGPathw<-function(pathID){
   library(KEGGREST)
   g<-keggGet(pathID)[[1]]$GENE

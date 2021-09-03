@@ -33,12 +33,14 @@ anno_dmr <- annotatePeak(dmr, tssRegion=c(-2000, 2000),
 anno_dmr<-as.data.frame(anno_dmr)
 head(anno_dmr,10)
 fwrite(anno_dmr,fp(out,"chipseaker_anno_dmr.csv.gz"),sep=";")
+anno_dmr<-fread(fp(out,"chipseaker_anno_dmr.csv.gz"),sep=";")
+
 dmr_tss<-data.table(anno_dmr)[,chr:=seqnames][,tss_dist:=distanceToTSS][,gene:=SYMBOL][,.(chr,start,end,tss_dist,gene)]
 
 dmr_res<-merge(dmr_res,dmr_tss,all.x=T)
 dmr_res[z_sidak_p<0.05&abs(tss_dist)<2000]$gene
-
-
+dmr_res[gene=="SOCS3"]
+res_cl[gene=="SOCS3"&abs(tss_dist)<2000]
 
 #r2 avec DEGs (top1000)
 

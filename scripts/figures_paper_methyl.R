@@ -121,7 +121,7 @@ res<-fread("../methyl/outputs/model14_without_iugr/2020-10-08_all_res_with_perm.
 #OR 
 
 renv::install("bioc::clusterProfiler")
-library(clusterProfiler,)
+library(clusterProfiler)
 library(enrichplot)
 library(org.Hs.eg.db)
 res_kegg<-enrichKEGG(bitr(resg_cl[GeneScore>60&pval<10^-3]$gene,fromType = "SYMBOL",toType = "ENTREZID",OrgDb = org.Hs.eg.db)$ENTREZID,

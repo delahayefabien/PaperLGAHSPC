@@ -1,6 +1,108 @@
 
 
+#QC
+
+deterPctTrueZeroLocis<-function(matCpG){
+  #parmi les locis avec pct0>, quelle pct de locis avec vrais zeros ?
+  #1) remplace NA par 0
+  matCpG[is.na(matCpG)]<-0
+  #2) recupÃ¨re mat avec plus de 35% de 0 dans locis
+  matCpG<-matCpG[((rowSums(matCpG==0)/ncol(matCpG))>0.35),]
+  pctLocisAvecVraisZeros<-sum(rowSums(matCpG>0&matCpG<5)>0)/nrow(matCpG)
+  print(paste("pct Locis avec Vrais zeros =",round(pctLocisAvecVraisZeros,3)))
+  return(pctLocisAvecVraisZeros)
+}
+
+deterCorrelWithLibraryComplex<-function(mat,mtd,covarNum="Group_Complexity",pcTestes=5){
+  #quelle corralation avec library complexity?
+  
+  mat[is.na(mat)]<-0
+  if(nrow(mat)>100000){
+      mat<-mat[sample(1:nrow(mat),100000),]
+    }
+  pca<-prcomp(t(mat))
+  pc<-pca$x
+  library<-as.numeric(data.frame(mtd,row.names = "sample")[rownames(pc),covarNum])
+  
+  correl_score_max<-0
+  
+  for (i in 1:pcTestes){
+    
+    resLm<-lm(pc[,i]~library)
+    p<-anova(resLm)$Pr[1]
+    r2<-summary(resLm)$adj.r.squared
+    pctPC<-round(pca$sd[i]^2/sum(pca$sdev^2),3)
+    correl_score<-(-log10(p))*r2/pctPC
+    
+    if(correl_score>correl_score_max){
+      correl_score_max<-correl_score
+    
+    }else{
+      return(correl_score_max)}
+    
+  }
+  
+  
+
+  
+  return(res)
+  
+}
+
+deterSeuilQC<-function(dataCpG,metrique,mtd,qTestes,qualMetriques=c(1,2),test="quantile",lowerThan=T){
+  require(stringr)
+  samples<-names(dataCpG)[str_detect(names(dataCpG),"CBP")]
+  if (1%in% qualMetriques){
+    quals<-rep(0,length(qTestes))
+  }
+  if (2%in% qualMetriques){
+    quals2<-rep(0,length(qTestes))
+  }
+  
+  print(paste("determine si",metrique,"peut permettre d'exclure des locis de faible confiance"))
+  for (i in 1:length(qTestes)){
+    q<-qTestes[i]
+    print(paste("seuil",q))
+    if(test=="quantile"){
+      q<-quantile(dataCpG[,metrique],q,na.rm=T)
+      
+    }
+    if(lowerThan){
+      locisLo<-na.exclude(rownames(dataCpG)[dataCpG[,metrique]<=q])
+      print(paste("analyses qualitÃ© des",length(locisLo),"locis avec",metrique,"<",q))
+    }else{
+      locisLo<-na.exclude(rownames(dataCpG)[dataCpG[,metrique]>=q])
+      print(paste("analyses qualitÃ© des",length(locisLo),"locis avec",metrique,">",q))
+    }
+    
+    
+    
+    if(length(locisLo)>100000){
+      locisLo<-sample(locisLo,100000)
+    }
+    dataCpGLo<-as.matrix(dataCpG[locisLo,samples])
+    
+    if (1%in% qualMetriques){
+      quals[i]<-deterPctTrueZeroLocis(dataCpGLo)
+    }
+    
+    
+    if (2%in% qualMetriques){
+      quals2[i]<-deterCorrelWithLibraryComplex(dataCpGLo,mtd)
+  
+    }
+    
+  }
+  
+  print(plot(qTestes,quals,main=paste('pctLocis Avec Vrais Zeros en fonction',metrique)))
+  print(plot(qTestes,quals2,main=paste('correl score PC~library',metrique),log="y"))
+  return(list(pct_true_zero_locis=quals,correl_score=quals2))
+}
+
+
+
 ##function explor data before modeling
+
 pctPC<-function(pca,rngPCs="all"){
   if(is.character(rngPCs)){
     rngPCs<-1:length(pca$sdev)
@@ -19,25 +121,35 @@ plotPCVarExplain<-function(pca,rngPCs,lineSeuilPct=1,returnPCSeuils=T){
   
 }
 
-CorrelCovarPCs<-function(pca,rngPCs,batch,var_num,var_fac,exclude=NULL,res="pval",seuilP=0.1,return=FALSE,plot=TRUE){
-  pc<-data.frame(pca$x)
-  if(is.data.table(batch)){
-    batch<-data.frame(batch,row.names = "sample")
-  }
-  batch_num=batch[rownames(pc),var_num]
+CorrelCovarPCs<-function(pca,mtd,vars_num=NULL,vars_fac=NULL,rngPCs=1:30,res="pval",seuilP=0.1,return=TRUE,plot=TRUE){
+  require(data.table)
   
-  batch_fac=batch[rownames(pc),var_fac]
-  batch_fac<-batch_fac[,sapply(batch_fac, function(x)length(unique(x))>1)]
-  batch_num=t(batch_num)
-  batch_fac=t(batch_fac)
-  split_num=split(batch_num,rownames(batch_num))
-  split_fac=split(batch_fac,rownames(batch_fac))
+  pcs<-data.frame(pca$x)
+  
+  if(is.null(vars_num))vars_num=colnames(mtd)[sapply(mtd, is.numeric)]
+  if(is.null(vars_fac))vars_fac=colnames(mtd)[!sapply(mtd, is.numeric)&colnames(mtd)!="sample"]
+  
+  mtd[,(vars_fac):=lapply(.SD,as.factor),.SDcols=vars_fac]
+  
+  if(is.data.table(mtd)){
+    mtd<-data.frame(mtd,row.names = "sample")
+  }
+  
+  mtd_num=mtd[rownames(pcs),vars_num]
+  mtd_fac=mtd[rownames(pcs),vars_fac]
+  
+  mtd_fac<-mtd_fac[,sapply(mtd_fac, function(x)length(levels(x))>1)]
+  
+  mtd_num=t(mtd_num)
+  mtd_fac=t(mtd_fac)
+  split_num=split(mtd_num,rownames(mtd_num))
+  split_fac=split(mtd_fac,rownames(mtd_fac))
   res_num=lapply(split_num,function(x,ret=res){
     FAC1.p<-rep(0,length(rngPCs))
     FAC1.r2<-rep(0,length(rngPCs))
     for (i in rngPCs){
       FAC1<-as.numeric(x)
-      FAC1<-lm(pc[,i]~FAC1)
+      FAC1<-lm(pcs[,i]~FAC1)
       FAC1.p[i]<-anova(FAC1)$Pr[1]
       FAC1.r2[i]<-summary(FAC1)$adj.r.squared
     }
@@ -53,7 +165,7 @@ CorrelCovarPCs<-function(pca,rngPCs,batch,var_num,var_fac,exclude=NULL,res="pval
     FAC1.r2<-rep(0,length(rngPCs))
     for (i in rngPCs){
       FAC1<-as.factor(x)
-      FAC1<-lm(pc[,i]~FAC1)
+      FAC1<-lm(pcs[,i]~FAC1)
       FAC1.p[i]<- anova(FAC1)$Pr[1]
       FAC1.r2[i]<-summary(FAC1)$adj.r.squared
     }
@@ -67,22 +179,24 @@ CorrelCovarPCs<-function(pca,rngPCs,batch,var_num,var_fac,exclude=NULL,res="pval
   res.num<-do.call(rbind,res_num)
   res.fac<-do.call(rbind,res_fac)
   final_res<-rbind(res.num,res.fac)
-  res2<-data.matrix(final_res)
+  final_res<-data.matrix(final_res)
   if(plot){
-    library(pheatmap)
+    require(pheatmap)
+    resToPlot<-final_res
   if(res=="pval"){
-    res2[which(res2>seuilP)]<-1 ####here I basicaly put them to 1 if less than 0.1
-    resToPlot<--log10(res2)
+    
+    resToPlot[which(resToPlot>seuilP)]<-1 ####here I basicaly put them to 1 if less than 0.1
+    resToPlot<--log10(resToPlot)
     breakRes<-c(40,20,10:1, 0.5,0.1)
   }else{
-    res2[res2<0]<-0
-    resToPlot<-res2
+    resToPlot[resToPlot<0]<-0
+    resToPlot<-resToPlot
     breakRes<-NA
     
   }
   
   pct.varPCs<-pctPC(pca,rngPCs)*100
-  vars<-rownames(resToPlot)[!(rownames(resToPlot)%in%exclude)]
+  vars<-rownames(resToPlot)
   
   pheatmap(resToPlot[vars,rngPCs],cluster_rows = F,cluster_cols = F,
            labels_col= paste0("PC",rngPCs,"(",round(pct.varPCs[as.character(rngPCs)],0),"%)"),
@@ -94,8 +208,8 @@ CorrelCovarPCs<-function(pca,rngPCs,batch,var_num,var_fac,exclude=NULL,res="pval
   
   
   if(return){
-    colnames(res2)<-paste0("PC",rngPCs)
-   return(res2) 
+    colnames(final_res)<-paste0("PC",rngPCs)
+   return(final_res) 
   }
   
   
@@ -103,10 +217,31 @@ CorrelCovarPCs<-function(pca,rngPCs,batch,var_num,var_fac,exclude=NULL,res="pval
 }
 
 
-correl<-function(x,y,ret="all",verbose=T){
+plotPvalsHeatMap<-function(pvals_mat,p.thr=0.1,col_breaks=c(40,20,10:1, 0.5,0.1),cluster_rows = F,cluster_cols = F){
+    require(pheatmap)
+    
+    pvals_mat[which(pvals_mat>p.thr)]<-1 #### put them to 1 if less than 0.1
+    pvals_mat<--log10(pvals_mat)
+  
+    vars<-rownames(pvals_mat)
+  
+    pheatmap(pvals_mat,cluster_rows = cluster_rows,cluster_cols = cluster_cols,
+             display_numbers = T,
+             color = colorRampPalette(c("white", "red"))(13), breaks = col_breaks)
+  
+  }
+
+
+correl<-function(x,y=NULL,ret="pval",verbose=F){
+  if(is.null(y)){
+    y=unlist(x[,2],use.names = F)
+    x=unlist(x[,1],use.names = F)
+    }
+  
   if(is.numeric(x)){
+    
     if(verbose){
-      print("linear modeling ")
+      message("linear modeling ")
     }
     
     res<-lm(x~y)
@@ -127,9 +262,11 @@ correl<-function(x,y,ret="all",verbose=T){
     
   }else if(all(sapply(list(x,y),is.factor))){
     if(verbose){
-      print("Chi-squared independance test")
+      message("Chi-squared independance test")
     }
     
+    x<-factor(x,levels = unique(x))
+    y<-factor(y,levels = unique(y))
     tableF<-table(x,y)
     test<-chisq.test(tableF)
     if(verbose){
@@ -457,75 +594,75 @@ plotMeth<-function(cpgs,
                    factor="Group_Sex",
                    levels=c("C_F","C_M","L_F","L_M"),
                    methyl_df=NULL,
-                   batch=NULL,
+                   mtd=NULL,
                    plot="boxplot",
-                   group="locisID",
+                   group="cpg_id",
                    wrap=FALSE){
   library(ggplot2)
   library(data.table)
   if(is.null(methyl_df)){
     methyl_df<-fread("datasets/cd34/2020-05-25_methyl_data_before_limma.csv")
   }
-  if(is.null(batch)){
-    batch<-fread("datasets/cd34/cleaned_batch_CD34_library_date_220620.csv")
+  if(is.null(mtd)){
+    mtd<-fread("datasets/cd34/cleaned_mtd_CD34_library_date_220620.csv")
     
-    keep<-batch[[factor]]%in%levels
-    batch<-batch[as.vector(keep)]
+    keep<-mtd[[factor]]%in%levels
+    mtd<-mtd[as.vector(keep)]
   }
   
   if(is.data.table(cpgs)){
     dt<-copy(cpgs)
-    cpgs<-dt$locisID
+    cpgs<-dt$cpg_id
   }else{
     dt<-NA
   }
   
   if(is.numeric(cpgs)){
 
-        cpgs_data<-methyl_df[locisID%in%cpgs]
-        #need transformer methyl_df en df with sample,locisID,meth,group..
-        samples<-colnames(cpgs_data)[colnames(cpgs_data)!="locisID"]
+        cpgs_data<-methyl_df[cpg_id%in%cpgs]
+        #need transformer methyl_df en df with sample,cpg_id,meth,group..
+        samples<-colnames(cpgs_data)[colnames(cpgs_data)!="cpg_id"]
         
         cpgs_data2<-data.table(expand.grid(sample=samples,
-                               locisID=cpgs_data$locisID))
+                               cpg_id=cpgs_data$cpg_id))
         cpgs_score<-Reduce(rbind,lapply(samples, function(sampleID){
           
-          return(cpgs_data[,unmeth:=.SD,.SDcols=sampleID][,sample:=sampleID][,.(locisID,sample,unmeth)])
+          return(cpgs_data[,unmeth:=.SD,.SDcols=sampleID][,sample:=sampleID][,.(cpg_id,sample,unmeth)])
         }))
         
-        cpgs_data2<-merge(cpgs_data2,cpgs_score,by=c("locisID","sample"))
+        cpgs_data2<-merge(cpgs_data2,cpgs_score,by=c("cpg_id","sample"))
         
         
         cpgs_data2<-cpgs_data2[!is.na(unmeth)]
-        cpgs_data_batch<-merge(cpgs_data2,batch[match(cpgs_data2$sample,sample)][!is.na(sample)],by="sample",allow.cartesian=TRUE)
+        cpgs_data_mtd<-merge(cpgs_data2,mtd[match(cpgs_data2$sample,sample)][!is.na(sample)],by="sample",allow.cartesian=TRUE)
         
         if(any(!is.na(dt))){
-          cpgs_data_batch<-merge(cpgs_data_batch,dt,by="locisID")
+          cpgs_data_mtd<-merge(cpgs_data_mtd,dt,by="cpg_id")
           
         }
         
-        ord<-as.character(unique(lapply(cpgs_data_batch[,.SD,.SDcols=group],sort)[[1]]))
+        ord<-as.character(unique(lapply(cpgs_data_mtd[,.SD,.SDcols=group],sort)[[1]]))
         
-        cpgs_data_batch[,(group):=lapply(.SD,function(x)factor(as.character(x),levels=ord)),.SDcols=group]
+        cpgs_data_mtd[,(group):=lapply(.SD,function(x)factor(as.character(x),levels=ord)),.SDcols=group]
         
         
         if(plot=="boxplot"){
           if(wrap){
-            return(ggplot(cpgs_data_batch)+
+            return(ggplot(cpgs_data_mtd)+
                      geom_boxplot(aes_string(factor,"unmeth",fill=factor),width=0.5)+
                      facet_wrap(group)+
               theme_minimal())
           }
-          return(ggplot(cpgs_data_batch)+geom_boxplot(aes_string(factor,"unmeth",fill=group))+scale_color_manual(breaks=as.character(ord)))
+          return(ggplot(cpgs_data_mtd)+geom_boxplot(aes_string(factor,"unmeth",fill=group))+scale_color_manual(breaks=as.character(ord)))
           
         }else if(plot=="jitter"){
           if(wrap){
-            return(ggplot(cpgs_data_batch,aes_string(group,"unmeth",col=factor))+
+            return(ggplot(cpgs_data_mtd,aes_string(group,"unmeth",col=factor))+
                      geom_jitter(width = 0.25)+facet_wrap(factor)+ 
                      stat_summary(fun.y=median, geom="point", size=2, color="red")+
                      theme_minimal())
           }else{
-            return(ggplot(cpgs_data_batch,aes_string(factor,"unmeth",color=group))+
+            return(ggplot(cpgs_data_mtd,aes_string(factor,"unmeth",color=group))+
                      geom_jitter(width = 0.25)+
                      stat_summary(fun.y=median, geom="point", size=2, color="red")+
                      scale_color_discrete(limits=as.character(ord))+
@@ -534,7 +671,7 @@ plotMeth<-function(cpgs,
           
           
         }else if(plot=="violin"){
-          return(ggplot(cpgs_data_batch,aes_string(factor,"unmeth",fill=group))+
+          return(ggplot(cpgs_data_mtd,aes_string(factor,"unmeth",fill=group))+
                    geom_violin()+
                    scale_fill_discrete(limits=as.character(ord))+
                    theme_minimal())
@@ -547,24 +684,24 @@ plotMeth<-function(cpgs,
 }
 
 
-RunMethAnalysis<-function(methyl_df,batch_filtered,formule,cpg.regs_ref,compas_df,sumToGene=FALSE,verbose=TRUE){
+RunMethAnalysis<-function(methyl_df,mtd_filtered,formule,cpg.regs_ref,compas_df,sumToGene=FALSE,verbose=TRUE){
   library(limma)
   
   if("data.table"%in%class(methyl_df)){
     print("transforming methyl_data in dataframe")
-    methyl_df<-data.frame(methyl_df,row.names = methyl_df$locisID)
+    methyl_df<-data.frame(methyl_df,row.names = methyl_df$cpg_id)
     print(head(methyl_df))
   }
   
-  if("data.table"%in%class(batch_filtered)){
-    print("transforming batch metadata in dataframe")
-    batch_F<-data.frame(batch_filtered)
-    print(head(batch_filtered))
+  if("data.table"%in%class(mtd_filtered)){
+    print("transforming mtd metadata in dataframe")
+    mtd_F<-data.frame(mtd_filtered)
+    print(head(mtd_filtered))
   }
   
-  design<-model.matrix(formule,data = batch_filtered)
+  design<-model.matrix(formule,data = mtd_filtered)
 
-  fit <- lmFit(methyl_df[,batch_filtered$sample], design)  
+  fit <- lmFit(methyl_df[,mtd_filtered$sample], design)  
   
   cont.matrix <- makeContrasts(contrasts = compas_df$compa,
                                levels=design)
@@ -579,23 +716,23 @@ RunMethAnalysis<-function(methyl_df,batch_filtered,formule,cpg.regs_ref,compas_d
     res_list<-lapply(compas_df$abbrev_compa,function(compa){
       res<-topTable(fit2,coef=compa,n =Inf)
       
-      res<-CalcGeneScore(res,cpg.regs_ref,sumToGene=sumToGene,verbose = verbose)
-      return(res[order(-GeneScore)])
+      res<-Calcgene_score(res,cpg.regs_ref,sumToGene=sumToGene,verbose = verbose)
+      return(res[order(-gene_score)])
     })
     names(res_list)<-compas_df$abbrev_compa
     return(res_list)
     
   }else{
     res<-topTable(fit2,coef=compas_df$abbrev_compa,n =Inf)
-    res<-CalcGeneScore(res,cpg.regs_ref,sumToGene=sumToGene,verbose=verbose)
-    return(res[order(-GeneScore)])
+    res<-Calcgene_score(res,cpg.regs_ref,sumToGene=sumToGene,verbose=verbose)
+    return(res[order(-gene_score)])
   }
   
   
   
 }
 
-#CALCUL GENESCORE
+#CALCUL gene_score
 
 CalcCpGWeights<-function(cpgs_genes){
   
@@ -656,11 +793,11 @@ CalcCpGWeights<-function(cpgs_genes){
   cpgs_genes[in_wb_eQTR==TRUE,in_meta_eQTR:=FALSE]
   cpgs_genes[in_meta_eQTR==TRUE,in_wb_eQTR:=FALSE]
   
-  cpgs_genes[,inBoth_eQTR:=any(in_meta_eQTR==TRUE)&any(in_wb_eQTR==TRUE),by=c("locisID","gene")]
+  cpgs_genes[,inBoth_eQTR:=any(in_meta_eQTR==TRUE)&any(in_wb_eQTR==TRUE),by=c("cpg_id","gene")]
   
-  cpgs_genes[inBoth_eQTR==TRUE,LinksWeight:=1,by=c("locisID","gene")]
+  cpgs_genes[inBoth_eQTR==TRUE,LinksWeight:=1,by=c("cpg_id","gene")]
   
-  cpgs_genes[inBoth_eQTR==FALSE,LinksWeight:=max(LinkScore),by=c("locisID","gene")]
+  cpgs_genes[inBoth_eQTR==FALSE,LinksWeight:=max(LinkScore),by=c("cpg_id","gene")]
   
   cpgs_genes[inBoth_eQTR==TRUE,LinksWeight:=1]
   
@@ -681,23 +818,25 @@ CalcCpGScore<-function(res,cpg_genes=NULL,verbose=TRUE){
       res$logFC<-res$meth.change
       
     }
-    if(!("locisID"%in%colnames(res))){
-      res$locisID<-rownames(res)
+    if(!("cpg_id"%in%colnames(res))){
+      res$cpg_id<-rownames(res)
     }
-    res<-data.table(locisID=as.numeric(res$locisID),
+    res<-data.table(cpg_id=as.numeric(res$cpg_id),
                     meth.change=res$logFC,
-                    pval=res$P.Value)[order(locisID)]
+                    pval=res$P.Value)[order(cpg_id)]
     
-    res<-merge(res,cpg_genes,by="locisID")
+    res<-merge(res,cpg_genes,by="cpg_id")
+    
     
   }else if(is.null(cpg_genes)&
            !all(c("LinksWeight","RegWeight")%in%colnames(res))){
     library(data.table)
     cpg_genes<-fread("ref/2020-06-29_All_CpG-Gene_links.csv")
-    res<-merge(res,cpg_genes,all=T,by="locisID")
+    res<-merge(res,cpg_genes,all=T,by="cpg_id")
   }
   
   if(all(c("LinksWeight","RegWeight")%in%colnames(res))){
+    res[,cpg_score:=(-log10(pval)/4*meth.change)*RegWeight*LinksWeight]
   }else{
     print("need calculate linksWeight and RegWeight of CpGs before.")
   }
@@ -707,79 +846,79 @@ CalcCpGScore<-function(res,cpg_genes=NULL,verbose=TRUE){
   
 }
 
-CalcGeneScore<-function(res,cpg.regs_ref=NULL,pvalSig=0.001,sumToGene=FALSE,test=FALSE,recalcul_CpGScore=FALSE,verbose=TRUE){
+CalcGeneScore<-function(res,cpg.regs_ref=NULL,pvalSig=0.001,sumToGene=FALSE,test=FALSE,recalcul_cpg_score=FALSE,verbose=TRUE){
   
-  if((!"CpGScore"%in%colnames(res))|recalcul_CpGScore==TRUE){
+  if((!"cpg_score"%in%colnames(res))|recalcul_cpg_score==TRUE){
     if(verbose){
-      print("calculating CpGScore...")
+      print("calculating cpg_score...")
     }
     
-    res<-CalcCpGScore(res,cpg.regs_ref,useChromatinFeature=useChromatinFeature,verbose = verbose)
+    res<-CalcCpGScore(res,cpg.regs_ref,verbose = verbose)
   }
   
   if(verbose){
-    print("calculating GeneScore...")
+    print("calculating gene_score...")
     print("1) add column number of CpG by Gene")
   }
   
   
-  res[,nCpG.Gene:=.N,by=.(gene)]
+  res[,n.cpg.gene:=.N,by=.(gene)]
   
-  res[,nCpGSig.Gene:=sum(pval<pvalSig),by=.(gene)]
+  res[,n.cpg.sig.gene:=sum(pval<pvalSig),by=.(gene)]
   if(verbose){
-    print("2) the nCpGWeight : (1/sum(1/(abs(CpGScore)+1)))^(1/4)")
+    print("2) the n.cpg_weight : (1/sum(1/(abs(cpg_score)+1)))^(1/4)")
   }
   
-  res[,nCpGWeight:=(1/sum(1/(abs(CpGScore)+1)))^(1/4),by="gene"]
+  res[,n.cpg_weight:=(1/sum(1/(abs(cpg_score)+1)))^(1/4),by="gene"]
   
   if(verbose){
-    print("3) the GeneScore : sum(CpGScore)*nCpGWeight")
+    print("3) the gene_score : sum(cpg_score)*n.cpg_weight")
   }
-  res[,GeneScore:=sum(CpGScore)*nCpGWeight,by="gene"]
+  res[,gene_score:=sum(cpg_score)*n.cpg_weight,by="gene"]
   
   if(test==TRUE){
     library(ggplot2)
     library(patchwork)
-    print("plot GeneScore ~ nCpG")
+    print("plot gene_score ~ nCpG")
     p1<-ggplot(unique(res,by="gene"))+
-      geom_boxplot(aes(x = as.factor(nCpG.Gene),y =nCpGWeight )) 
+      geom_boxplot(aes(x = as.factor(nCpG.Gene),y =n.cpg_weight )) 
     
     p2<-ggplot(unique(res,by="gene"))+
-      geom_boxplot(aes(x = as.factor(nCpG.Gene),y =GeneScore )) 
+      geom_boxplot(aes(x = as.factor(nCpG.Gene),y =gene_score )) 
     p_all<-p1+p2
     print(p_all)
   }
   
   if(sumToGene){
-    return(unique(res[order(-GeneScore,pval)],by="gene"))
+    return(unique(res[order(-gene_score,pval)],by="gene"))
   }else{
-    return(res[order(-GeneScore,pval)])
+    return(res[order(-gene_score,pval)])
   }
 }
 
-#deter genescore cutoff x / deter EpigenAffGene (EAG) : 
-# 1000 permuts of all samples CTRL / LGA => LIMMA => pval and FC => df GeneScore => save pct genescore permuts >= geneScore obs
+#deter gene_score cutoff x / deter EpigenAffGene (EAG) : 
+# 1000 permuts of all samples CTRL / LGA => LIMMA => pval and FC => df gene_score => save pct gene_score permuts >= gene_score obs
 #=> gene score cutoff = Accept Gene in EAF if appeared < x%  => genesF and genesM spe
 #make a permutFunction
 
-prepBatchDf<-function(batch,varNumToModel,varFacToModel){
+prepmtdDf<-function(mtd,varNumToModel,varFacToModel){
   
   varToModel<-c(varNumToModel,varFacToModel)
   
-  sample_F<-batch$sample[!(apply(is.na(batch[,..varToModel]),1,any))]
+  sample_F<-mtd$sample[!(apply(is.na(mtd[,..varToModel]),1,any))]
   
   print(paste(length(sample_F),"after filtration for NA "))
   
-  batch<-batch[sample%in%sample_F,c("sample",..varToModel),]
+  mtd<-mtd[sample%in%sample_F,c("sample",..varToModel),]
   
-  batch[,(varNumToModel):=lapply(.SD,as.numeric),.SDcols=varNumToModel]
-  batch[,(varFacToModel):=lapply(.SD,as.factor),.SDcols=varFacToModel]
+  mtd[,(varNumToModel):=lapply(.SD,as.numeric),.SDcols=varNumToModel]
+  mtd[,(varFacToModel):=lapply(.SD,as.factor),.SDcols=varFacToModel]
   
-  return(batch)
+  return(mtd)
 }
-permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,batch,var_to_permut,n_perm=1000,seed=1234,
-                          varNumToModel=c("Mat.Age"),varFacToModel=c("Group_Sex",'batch',"latino","Group_Complexity_Fac"),
-                          formule= ~0 + Group_Sex  + batch  + latino + Mat.Age + Group_Complexity_Fac,
+permutgene_score<-function(res_to_permut,methyl_df,cpg.regs_ref,mtd,var_to_permut,n_perm=1000,seed=1234,
+                          varNumToModel=c("Mat.Age"),varFacToModel=c("Group_Sex",'mtd',"latino","Group_Complexity_Fac"),
+                          formule= ~0 + Group_Sex  + mtd  + latino + Mat.Age + Group_Complexity_Fac,
                           verbose=FALSE
 ){
   library(data.table)
@@ -788,7 +927,7 @@ permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,batch,var_to_perm
   if(!is.list(res_to_permut)){
     print("need results in a  list named by comparison")
   }
-  batch<-prepBatchDf(batch,varNumToModel,varFacToModel)
+  mtd<-prepmtdDf(mtd,varNumToModel,varFacToModel)
   
   compas_df<-data.frame(compa=unlist(lapply(strsplit(names(res_to_permut),"-"),function(x)paste(paste0(var_to_permut,x),collapse = "-"))),
                         abbrev_compa=names(res_to_permut))
@@ -798,7 +937,7 @@ permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,batch,var_to_perm
   res_all<-data.table(gene=sort(unique(res_to_permut[[1]]$gene)))
   
   
-  batch_sim<-copy(batch)
+  mtd_sim<-copy(mtd)
   print(paste("set seed to",seed))
   set.seed(seed)
   
@@ -806,9 +945,9 @@ permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,batch,var_to_perm
   for(i in 1:n_perm){
     print(paste(i,"/",n_perm))
     
-    batch_sim[,Group_Sex:=sample(Group_Sex)]
+    mtd_sim[,Group_Sex:=sample(Group_Sex)]
     res_list<-RunMethAnalysis(methyl_df = methyl_df,
-                              batch_F = batch_sim,
+                              mtd_F = mtd_sim,
                               formule = formule,
                               compas_df =compas_df,
                               cpg.regs_ref = cpg.regs_ref,
@@ -818,9 +957,9 @@ permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,batch,var_to_perm
     
     res_list<-lapply(names(res_list),function(compa){
       res<-res_list[[compa]]
-      res<-res[order(gene)][,.(gene,GeneScore)]
+      res<-res[order(gene)][,.(gene,gene_score)]
       col<-paste0(str_sub(compa,str_length(compa)),i)
-      return(res[,(col):=as.integer(GeneScore)][,-"GeneScore"])
+      return(res[,(col):=as.integer(gene_score)][,-"gene_score"])
     })
     
     res_list<-Reduce(merge,res_list)
@@ -834,7 +973,7 @@ permutGeneScore<-function(res_to_permut,methyl_df,cpg.regs_ref,batch,var_to_perm
     compa<-names(res_to_permut)[i]
     cols<-paste0(str_sub(compa,str_length(compa)),1:n_perm)
     col<-paste0("pval",n_perm,"perm")
-    res<-res[order(gene)][,(col):=rowSums(..res_all[order(gene)][,.SD,.SD=cols]>GeneScore)/(..n_perm)]
+    res<-res[order(gene)][,(col):=rowSums(..res_all[order(gene)][,.SD,.SD=cols]>gene_score)/(..n_perm)]
     cols<-c("gene",col)
     return(merge(res_to_permut[[i]],res[,.SD,.SD=cols],by="gene"))
   })
@@ -847,8 +986,7 @@ getGenesKEGGPathw<-function(pathID){
   library(KEGGREST)
   g<-keggGet(pathID)[[1]]$GENE
   g<-g[1:length(g)%%2==0]
-  return(as.vector(sapply(g,function(x)strsplit(x,";")[[1]][1])))
-}
+  return(as.vector(sapply(g,function(x)strsplit(x,";")[[1]][1])))}
 
 
 ul<-function(x)as.vector(unique(unlist(x)))

@@ -1,0 +1,13 @@
+outputs/
+logs/
+reports/
+datasets/
+old/
+tools/
+ref/
+scripts/paper_epi_response/figures_epi_response.R
+scripts/motif_analysis_dmc.R
+scripts/model14_without_iugr.R
+scripts/liver_genescore.R
+scripts/chromHMM.R
+scripts/02A1-create_eQTR.R
