@@ -50,15 +50,20 @@ get_earliest_principal_node <- function(cbp.cds, time_bin="LT-HSC"){
 ### Analysis =======================================================================================
 
 cbps<-readRDS("outputs/10A-classical_integr/cbps0-8_clean.rds")
-cbps <- RunUMAP(cbps, reduction = "integrated.pca",reduction.name = "integrated.umap", dims = c(1:45))
+DefaultAssay(cbps) <- "integrated"
+Idents(cbps) <- "cell_type_hmap"
+cbps <- RunPCA(cbps,reduction.name = "integrated.pca",features = VariableFeatures(cbps))
 
+cbps <- RunUMAP(cbps, reduction = "integrated.pca",n.components = 3,reduction.name = "integrated.umap", dims = c(1:50))
 
-DefaultAssay(cbps) <- "RNA"
+DimPlot(cbps,reduction="integrated.umap",label=T)
+
 
 cbps[["pca"]]<-cbps@reductions$integrated.pca
 cbps[["umap"]]<-cbps@reductions$integrated.umap
 
 cbps.cds <- as.cell_data_set(cbps)
+
 cbps.cds <- cluster_cells(cds = cbps.cds, reduction_method = "UMAP")
 cbps.cds <- learn_graph(cbps.cds, use_partition = TRUE)
 
@@ -82,6 +87,7 @@ cbps <- AddMetaData(
 cbps$pseudotime[cbps$pseudotime==Inf]<-NA
 Idents(cbps)<-"cell_type_hmap"
 FeaturePlot(cbps,"pseudotime",reduction = 'umap',label=T)
+FeaturePlot(cbps,"pseudotime",dims=c(1,3),reduction = 'umap',label=T)
 
 
 cbps_f<-subset(cbps,lineage_hmap!="18"&ambigous==F&group!="iugr")
@@ -95,8 +101,7 @@ fwrite(mtd,fp(out,"metadata_pseudotime_ComputRoot.csv"))
 
 ggplot(mtd)+geom_boxplot(aes(y=pseudotime,x=lineage_hmap),alpha=0.7)+theme_minimal()
 
-ggplot(mtd)+geom_boxplot(aes(y=pseudotime,x=lineage_hmap,fill=group),alpha=0.7)+facet_wrap("hto")+
-  theme_minimal()
+ggplot(mtd)+geom_density(aes(x=pseudotime,col=group))+facet_wrap("hto")
 
 lga_b<-ggplot(mtd[group=="lga"&hto==F])+geom_density(aes(x=pseudotime,fill=group,col=group),alpha=0.7)+
   facet_wrap("sample")+theme_minimal()

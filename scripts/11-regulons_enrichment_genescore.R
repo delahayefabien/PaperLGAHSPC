@@ -39,16 +39,19 @@ library(enrichplot)
 ?GSEA
 
 regulons_df<-Reduce(rbind,lapply(names(regulons_list), function(tf)data.table(term=tf,gene=regulons_list[[tf]])))
+regulons_df<-regulons_df[,tf:=term][,.(tf,gene)]
+fwrite(regulons_df,"outputs/10-SCENIC/regulons_extended.csv")
+fwrite(regulons_df[!str_detect(tf,"e$")],"outputs/10-SCENIC/regulons.csv")
 
 res_gsea_cl<-GSEA(geneList = genes_rank,
                   TERM2GENE =data.frame(regulons_df) ,scoreType="pos",
-                  minGSSize = 10,maxGSSize = 500,eps=0)
+                  minGSSize = 10,maxGSSize = 500,eps=0,pvalueCutoff = 1)
 res_gsea_cl_dt<-data.table(as.data.frame(res_gsea_cl))
 
 saveRDS(res_gsea_cl,fp(out,"res_gsea_genescore_regulon_clusterprofiler.rds"))
 fwrite(res_gsea_cl_dt,fp(out,"res_gsea_genescore_regulon_clusterprofiler.csv"))
 
-res_gsea_cl_dt[p.adjust<0.05]
+res_gsea_cl_dt[p.adjust<0.01]
 res_gsea_cl_dt[ID=="EGR1"]
 head(res_gsea_cl_dt,100)
 head(res_gsea_cl_dt[order(p.adjust)]$ID,100)
